@@ -79,7 +79,7 @@ function parseCoords(s: string): LatLng[] {
     .trim()
     .split(/\s+/)
     .map((t) => t.split(",").map(Number))
-    .filter((p) => p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1]))
+    .filter((p) => p.length >= 2 && !isNaN(p[0]!) && !isNaN(p[1]!))
     .map((p) => ({ lat: p[1]!, lng: p[0]! }));
 }
 
