@@ -1,5 +1,6 @@
 export type FeatureKind = "marker" | "polygon" | "path";
-export type IconShape = "pin" | "circle" | "square" | "star";
+export type IconShape = "triangle" | "pin" | "circle" | "square" | "star";
+export const TRIANGLE_ICON_URL = "http://maps.google.com/mapfiles/kml/shapes/triangle.png";
 
 export interface LatLng {
   lat: number;
@@ -47,9 +48,9 @@ export function uid() {
 
 export function defaultStyle(kind: FeatureKind): FeatureStyle {
   if (kind === "marker")
-    return { color: "#facc15", strokeOpacity: 1, strokeWidth: 1, fillColor: "#facc15", fillOpacity: 1, scale: 1.4, icon: "pin" };
+    return { color: "#ffffff", strokeOpacity: 1, strokeWidth: 1, fillColor: "#ffffff", fillOpacity: 1, scale: 0.8, icon: "triangle" };
   if (kind === "polygon")
-    return { color: "#ffffff", strokeOpacity: 1, strokeWidth: 2, fillColor: "#22d3ee", fillOpacity: 0.35, scale: 1, icon: "pin" };
+    return { color: "#0000ff", strokeOpacity: 1, strokeWidth: 2, fillColor: "#0000ff", fillOpacity: 0.3, scale: 1, icon: "pin" };
   return { color: "#f97316", strokeOpacity: 1, strokeWidth: 3, fillColor: "#f97316", fillOpacity: 0, scale: 1, icon: "pin" };
 }
 

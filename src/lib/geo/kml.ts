@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { defaultStyle, uid, type FeatureKind, type FeatureNode, type FeatureStyle, type GeoNode, type LatLng } from "./types";
+import { defaultStyle, uid, TRIANGLE_ICON_URL, type FeatureKind, type FeatureNode, type FeatureStyle, type GeoNode, type LatLng } from "./types";
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
@@ -28,7 +28,8 @@ function placemark(f: FeatureNode, ind: string): string {
   let style = "";
   let geom = "";
   if (f.kind === "marker") {
-    style = `<IconStyle><color>${hexToKml(s.color, 1)}</color><scale>${s.scale}</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/wht-blank.png</href></Icon></IconStyle>`;
+    const href = s.icon === "triangle" ? TRIANGLE_ICON_URL : "http://maps.google.com/mapfiles/kml/paddle/wht-blank.png";
+    style = `<IconStyle><color>${hexToKml(s.color, 1)}</color><scale>${s.scale}</scale><Icon><href>${href}</href></Icon></IconStyle><LabelStyle><scale>${s.scale}</scale></LabelStyle>`;
     geom = `<Point><coordinates>${coordStr(f.coords.slice(0, 1))}</coordinates></Point>`;
   } else if (f.kind === "path") {
     style = `<LineStyle><color>${hexToKml(s.color, s.strokeOpacity)}</color><width>${s.strokeWidth}</width></LineStyle>`;
@@ -93,6 +94,8 @@ function parseStyle(el: Element | undefined): PartialStyle {
     if (c) st.color = kmlToHex(c).color;
     const sc = parseFloat(text(kid(icon, "scale")));
     if (!isNaN(sc)) st.scale = sc;
+    const href = text(deep(icon, "href")[0]);
+    st.icon = href.includes("triangle") ? "triangle" : "pin";
   }
   const line = deep(el, "LineStyle")[0];
   if (line) {
