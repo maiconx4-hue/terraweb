@@ -35,6 +35,7 @@ function Range({ value, min, max, step, onChange }: { value: number; min: number
 
 export function Properties({ node, nodes, onChange, onDelete, onZoom, onExport, onClose }: Props) {
   const feature = isFeature(node) ? node : null;
+  const pt = feature?.coords[0];
   const setStyle = (patch: Partial<FeatureStyle>) => feature && onChange({ style: { ...feature.style, ...patch } } as Partial<GeoNode>);
   const count = node.kind === "folder" ? descendantIds(nodes, node.id).size - 1 : 0;
   const title = node.kind === "folder" ? "Pasta" : node.kind === "marker" ? "Marcador" : node.kind === "polygon" ? "Polígono" : "Caminho";
@@ -55,16 +56,16 @@ export function Properties({ node, nodes, onChange, onDelete, onZoom, onExport, 
 
       {node.kind === "folder" && <p className="text-xs text-muted-foreground">{count} itens dentro desta pasta</p>}
 
-      {feature?.kind === "marker" && (
+      {feature?.kind === "marker" && pt && (
         <>
           <div className="grid grid-cols-2 gap-2">
             <Field label="Latitude">
-              <input type="number" step="any" className="earth-input w-full font-mono" value={feature.coords[0].lat}
-                onChange={(e) => onChange({ coords: [{ ...feature.coords[0], lat: parseFloat(e.target.value) || 0 }] })} />
+              <input type="number" step="any" className="earth-input w-full font-mono" value={pt.lat}
+                onChange={(e) => onChange({ coords: [{ ...pt, lat: parseFloat(e.target.value) || 0 }] })} />
             </Field>
             <Field label="Longitude">
-              <input type="number" step="any" className="earth-input w-full font-mono" value={feature.coords[0].lng}
-                onChange={(e) => onChange({ coords: [{ ...feature.coords[0], lng: parseFloat(e.target.value) || 0 }] })} />
+              <input type="number" step="any" className="earth-input w-full font-mono" value={pt.lng}
+                onChange={(e) => onChange({ coords: [{ ...pt, lng: parseFloat(e.target.value) || 0 }] })} />
             </Field>
           </div>
           <Field label="Ícone">

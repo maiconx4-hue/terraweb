@@ -35,7 +35,8 @@ function placemark(f: FeatureNode, ind: string): string {
     geom = `<LineString><tessellate>1</tessellate><coordinates>${coordStr(f.coords)}</coordinates></LineString>`;
   } else {
     const ring = [...f.coords];
-    if (ring.length && (ring[0].lat !== ring[ring.length - 1].lat || ring[0].lng !== ring[ring.length - 1].lng)) ring.push(ring[0]);
+    const a0 = ring[0], aN = ring[ring.length - 1];
+    if (a0 && aN && (a0.lat !== aN.lat || a0.lng !== aN.lng)) ring.push(a0);
     style = `<LineStyle><color>${hexToKml(s.color, s.strokeOpacity)}</color><width>${s.strokeWidth}</width></LineStyle><PolyStyle><color>${hexToKml(s.fillColor, s.fillOpacity)}</color></PolyStyle>`;
     geom = `<Polygon><tessellate>1</tessellate><outerBoundaryIs><LinearRing><coordinates>${coordStr(ring)}</coordinates></LinearRing></outerBoundaryIs></Polygon>`;
   }
@@ -78,8 +79,8 @@ function parseCoords(s: string): LatLng[] {
     .trim()
     .split(/\s+/)
     .map((t) => t.split(",").map(Number))
-    .filter((p) => p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1]))
-    .map(([lng, lat]) => ({ lat, lng }));
+    .filter((p) => p.length >= 2 && !isNaN(p[0]!) && !isNaN(p[1]!))
+    .map((p) => ({ lat: p[1]!, lng: p[0]! }));
 }
 
 type PartialStyle = Partial<FeatureStyle>;
@@ -152,7 +153,8 @@ export function parseKml(xml: string, importName = "Importado"): GeoNode[] {
     for (const g of deep(pm, "Polygon")) {
       const outer = deep(g, "outerBoundaryIs")[0] ?? g;
       const c = parseCoords(text(deep(outer, "coordinates")[0]));
-      if (c.length > 1 && c[0].lat === c[c.length - 1].lat && c[0].lng === c[c.length - 1].lng) c.pop();
+      const c0 = c[0], cN = c[c.length - 1];
+      if (c.length > 1 && c0 && cN && c0.lat === cN.lat && c0.lng === cN.lng) c.pop();
       geoms.push({ kind: "polygon", coords: c });
     }
     geoms
@@ -187,9 +189,9 @@ export function parseKml(xml: string, importName = "Importado"): GeoNode[] {
   const top = doc.documentElement;
   const docs = kids(top, "Document");
   if (docs.length === 1) {
-    const n = text(kid(docs[0], "name"));
+    const n = text(kid(docs[0]!, "name"));
     if (n) (out[0] as { name: string }).name = n;
-    walk(docs[0], rootId);
+    walk(docs[0]!, rootId);
   } else walk(top, rootId);
   return out;
 }
@@ -201,7 +203,7 @@ export async function readGeoFile(file: File): Promise<GeoNode[]> {
     const names = Object.keys(zip.files).filter((n) => /\.kml$/i.test(n));
     const name = names.find((n) => /doc\.kml$/i.test(n)) ?? names[0];
     if (!name) throw new Error("KMZ sem arquivo KML");
-    return parseKml(await zip.files[name].async("string"), base);
+    return parseKml(await zip.files[name]!.async("string"), base);
   }
   return parseKml(await file.text(), base);
 }

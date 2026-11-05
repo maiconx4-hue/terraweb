@@ -8,3 +8,4 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+- Map features are stored client-side (localStorage) as a flat node list with parentId folders; KML/KMZ I/O lives in src/lib/geo/kml.ts. Why: offline-friendly, no backend needed.

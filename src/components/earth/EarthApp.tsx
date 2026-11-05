@@ -43,7 +43,7 @@ function reducer(state: GeoNode[], a: Action): GeoNode[] {
 
 const STORAGE = "earth-web-nodes-v1";
 
-const ICONS: Record<string, { path: string; anchor: [number, number] }> = {
+const ICONS: Record<"pin" | "circle" | "square" | "star", { path: string; anchor: [number, number] }> = {
   pin: { path: "M12 2C8 2 5 5 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-4-3-7-7-7zm0 4.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z", anchor: [12, 22] },
   circle: { path: "M6 12a6 6 0 1 0 12 0a6 6 0 1 0 -12 0z", anchor: [12, 12] },
   square: { path: "M6 6h12v12H6z", anchor: [12, 12] },
@@ -68,7 +68,7 @@ function loadMaps(): Promise<void> {
 }
 
 const sameCoords = (a: LatLng[], b: LatLng[]) =>
-  a.length === b.length && a.every((p, i) => Math.abs(p.lat - b[i].lat) < 1e-10 && Math.abs(p.lng - b[i].lng) < 1e-10);
+  a.length === b.length && a.every((p, i) => Math.abs(p.lat - b[i]!.lat) < 1e-10 && Math.abs(p.lng - b[i]!.lng) < 1e-10);
 
 const pathToCoords = (path: any): LatLng[] => path.getArray().map((p: any) => ({ lat: p.lat(), lng: p.lng() }));
 
@@ -275,7 +275,7 @@ export default function EarthApp() {
       if (n.kind === "marker") {
         const pos = ov.getPosition();
         if (!pos || !sameCoords([{ lat: pos.lat(), lng: pos.lng() }], n.coords.slice(0, 1))) ov.setPosition(n.coords[0]);
-        const icon = ICONS[s.icon] ?? ICONS.pin;
+        const icon = ICONS[s.icon];
         ov.setOptions({
           title: n.name,
           draggable: sel && interactive,
@@ -321,7 +321,7 @@ export default function EarthApp() {
     const pts = nodesRef.current.filter((n) => ids.has(n.id) && isFeature(n)).flatMap((n) => (n as FeatureNode).coords);
     if (!pts.length) return;
     if (map.getStreetView().getVisible()) map.getStreetView().setVisible(false);
-    if (pts.length === 1) { map.setCenter(pts[0]); map.setZoom(18); return; }
+    if (pts.length === 1) { map.setCenter(pts[0]!); map.setZoom(18); return; }
     const b = new g.maps.LatLngBounds();
     pts.forEach((p) => b.extend(p));
     map.fitBounds(b, 60);
@@ -339,7 +339,7 @@ export default function EarthApp() {
       dispatch({ type: "add", nodes: imported });
       const n = imported.filter(isFeature).length;
       toast.success(`${n} itens importados de ${file.name}`);
-      setTimeout(() => zoomTo(imported[0].id), 50);
+      setTimeout(() => imported[0] && zoomTo(imported[0].id), 50);
     } catch (e: any) {
       toast.error(e?.message ?? "Não foi possível importar");
     }
@@ -369,7 +369,7 @@ export default function EarthApp() {
   const onGoto = () => {
     const m = goto.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)$/);
     if (!m) { toast.error("Use o formato: latitude, longitude"); return; }
-    const p = { lat: parseFloat(m[1]), lng: parseFloat(m[2]) };
+    const p = { lat: parseFloat(m[1]!), lng: parseFloat(m[2]!) };
     if (Math.abs(p.lat) > 90 || Math.abs(p.lng) > 180) { toast.error("Coordenadas fora do intervalo"); return; }
     mapRef.current?.getStreetView().setVisible(false);
     mapRef.current?.setCenter(p);
