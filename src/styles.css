@@ -142,3 +142,63 @@
     color: var(--color-foreground);
   }
 }
+
+/* ---------- Terra Web design system (dark, Earth-inspired) ---------- */
+@theme inline {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", ui-sans-serif, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+:root {
+  --background: oklch(0.17 0.02 240);
+  --foreground: oklch(0.95 0.01 230);
+  --card: oklch(0.21 0.025 240);
+  --card-foreground: oklch(0.95 0.01 230);
+  --popover: oklch(0.21 0.025 240);
+  --popover-foreground: oklch(0.95 0.01 230);
+  --primary: oklch(0.82 0.15 85);
+  --primary-foreground: oklch(0.2 0.03 240);
+  --secondary: oklch(0.27 0.03 240);
+  --secondary-foreground: oklch(0.95 0.01 230);
+  --muted: oklch(0.25 0.025 240);
+  --muted-foreground: oklch(0.68 0.03 235);
+  --accent: oklch(0.78 0.12 200);
+  --accent-foreground: oklch(0.18 0.03 240);
+  --destructive: oklch(0.63 0.21 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.32 0.03 240);
+  --input: oklch(0.3 0.03 240);
+  --ring: oklch(0.82 0.15 85);
+  --glass: oklch(0.19 0.025 240 / 0.88);
+  --shadow-float: 0 12px 32px -8px oklch(0 0 0 / 0.55);
+}
+body { font-family: var(--font-sans); }
+
+@layer components {
+  .earth-shell { @apply flex h-screen w-screen overflow-hidden bg-background text-foreground; }
+  .earth-sidebar { @apply flex w-80 shrink-0 flex-col border-r border-border bg-card; }
+  .earth-tree { @apply flex-1 overflow-y-auto py-1 text-sm; }
+  .earth-row { @apply flex cursor-pointer select-none items-center gap-1.5 py-1 pr-2 hover:bg-muted; }
+  .earth-row[data-selected="true"] { @apply bg-secondary text-primary; }
+  .earth-row[data-drop="true"] { @apply outline outline-1 outline-primary; }
+  .earth-main { @apply relative flex-1; }
+  .earth-map { @apply absolute inset-0; }
+  .earth-toolbar { @apply absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-border p-1.5; background: var(--glass); box-shadow: var(--shadow-float); backdrop-filter: blur(8px); }
+  .earth-float { @apply absolute z-10 flex items-center gap-2 rounded-lg border border-border px-3 py-2; background: var(--glass); box-shadow: var(--shadow-float); }
+  .earth-status { @apply absolute bottom-6 left-3 z-10 rounded-md px-2 py-1 font-mono text-xs; background: var(--glass); }
+  .earth-panel { @apply absolute right-3 top-16 z-10 w-72 space-y-3 overflow-y-auto rounded-lg border border-border p-4; max-height: calc(100% - 6rem); background: var(--glass); box-shadow: var(--shadow-float); backdrop-filter: blur(8px); }
+  .earth-seg { @apply flex rounded-md bg-muted p-0.5; }
+  .earth-seg-btn { @apply rounded px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground; }
+  .earth-seg-btn[data-active="true"] { @apply bg-primary text-primary-foreground; }
+  .earth-input { @apply rounded-md border border-input bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-ring; }
+  .earth-btn { @apply inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground transition-colors hover:bg-muted disabled:opacity-40; }
+  .earth-btn-primary { @apply inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90; }
+  .earth-btn-danger { @apply inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:opacity-90; }
+  .earth-icon-btn { @apply inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground; }
+  .earth-chip { @apply rounded-full border border-border px-2.5 py-0.5 text-xs text-muted-foreground; }
+  .earth-chip[data-active="true"] { @apply border-accent bg-accent text-accent-foreground; }
+  .earth-color { @apply h-8 w-12 cursor-pointer rounded border border-border bg-transparent; }
+  .earth-range { accent-color: var(--primary); }
+  .earth-info { color: oklch(0.2 0.02 240); max-width: 240px; font-family: var(--font-sans); }
+  .earth-info p { margin-top: 4px; white-space: pre-wrap; }
+}
