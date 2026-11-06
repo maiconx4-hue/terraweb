@@ -9,10 +9,11 @@ interface Props {
   onZoom: () => void;
   onExport: (f: "kml" | "kmz") => void;
   onClose: () => void;
+  onFtth?: () => void;
 }
 
 const ICONS: { id: IconShape; label: string }[] = [
-  { id: "pin", label: "Alfinete" }, { id: "circle", label: "Círculo" }, { id: "square", label: "Quadrado" }, { id: "star", label: "Estrela" },
+  { id: "triangle", label: "Triângulo" }, { id: "pin", label: "Alfinete" }, { id: "circle", label: "Círculo" }, { id: "square", label: "Quadrado" }, { id: "star", label: "Estrela" },
 ];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -33,7 +34,7 @@ function Range({ value, min, max, step, onChange }: { value: number; min: number
   );
 }
 
-export function Properties({ node, nodes, onChange, onDelete, onZoom, onExport, onClose }: Props) {
+export function Properties({ node, nodes, onChange, onDelete, onZoom, onExport, onClose, onFtth }: Props) {
   const feature = isFeature(node) ? node : null;
   const pt = feature?.coords[0];
   const setStyle = (patch: Partial<FeatureStyle>) => feature && onChange({ style: { ...feature.style, ...patch } } as Partial<GeoNode>);
@@ -100,6 +101,9 @@ export function Properties({ node, nodes, onChange, onDelete, onZoom, onExport, 
       )}
 
       <div className="flex flex-wrap gap-2 pt-1">
+        {feature?.kind === "polygon" && onFtth && (
+          <button className="earth-btn-primary w-full justify-center" onClick={onFtth}>Editar cálculo FTTH</button>
+        )}
         <button className="earth-btn" onClick={onZoom}><Crosshair className="size-4" /> Ir</button>
         <button className="earth-btn" onClick={() => onExport("kmz")}><Download className="size-4" /> KMZ</button>
         <button className="earth-btn-danger ml-auto" onClick={onDelete}><Trash2 className="size-4" /> Excluir</button>
