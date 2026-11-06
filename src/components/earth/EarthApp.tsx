@@ -110,7 +110,12 @@ export default function EarthApp() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE);
-      if (raw) dispatch({ type: "set", nodes: JSON.parse(raw) });
+      if (raw) {
+        const parsed = (JSON.parse(raw) as GeoNode[]).map((n) =>
+          n.kind === "polygon" ? { ...n, style: { ...n.style, color: "#ffffff", strokeWidth: 1, strokeOpacity: 1 } } : n,
+        );
+        dispatch({ type: "set", nodes: parsed });
+      }
     } catch { /* ignore */ }
     setLoaded(true);
   }, []);
