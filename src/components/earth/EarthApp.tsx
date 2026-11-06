@@ -8,6 +8,12 @@ import {
 import { buildKml, buildKmz, downloadBlob, readGeoFile } from "@/lib/geo/kml";
 import { Sidebar } from "./Sidebar";
 import { Properties } from "./Properties";
+import { FtthDialog } from "./FtthDialog";
+import { TRIANGLE_ICON_URL } from "@/lib/geo/types";
+import {
+  MARKER_DEFAULT_NAME, POLYGON_DEFAULT_DESCRIPTION, POLYGON_DEFAULT_NAME,
+  fmtM, pathLengthM, polygonCellLength,
+} from "@/lib/geo/ftth";
 
 declare global {
   interface Window {
@@ -16,7 +22,7 @@ declare global {
   }
 }
 
-type Mode = "none" | FeatureKind;
+type Mode = "none" | FeatureKind | "ruler";
 
 type Action =
   | { type: "set"; nodes: GeoNode[] }
@@ -84,6 +90,8 @@ export default function EarthApp() {
   const [cursor, setCursor] = useState<LatLng | null>(null);
   const [sv, setSv] = useState<{ visible: boolean; pos: LatLng | null; heading: number }>({ visible: false, pos: null, heading: 0 });
   const [goto, setGoto] = useState("");
+  const [ftthOpen, setFtthOpen] = useState(false);
+  const [savedMeasure, setSavedMeasure] = useState<number | null>(null);
 
   const mapDiv = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -117,9 +125,9 @@ export default function EarthApp() {
 
   const createFeature = useCallback((kind: FeatureKind, coords: LatLng[], name?: string) => {
     const count = nodesRef.current.filter((n) => n.kind === kind).length + 1;
-    const label = kind === "marker" ? "Marcador" : kind === "polygon" ? "Polígono" : "Caminho";
+    const defName = kind === "marker" ? MARKER_DEFAULT_NAME : kind === "polygon" ? POLYGON_DEFAULT_NAME : `Caminho ${count}`;
     const f: FeatureNode = {
-      id: uid(), kind, name: name ?? `${label} ${count}`, description: "",
+      id: uid(), kind, name: name ?? defName, description: kind === "polygon" ? POLYGON_DEFAULT_DESCRIPTION : "",
       parentId: targetFolder(), visible: true, coords, style: defaultStyle(kind),
     };
     dispatch({ type: "add", nodes: [f] });
@@ -153,7 +161,7 @@ export default function EarthApp() {
           const m = modeRef.current;
           const p = { lat: e.latLng.lat(), lng: e.latLng.lng() };
           if (m === "marker") createFeature("marker", [p]);
-          else if (m === "polygon" || m === "path") setDraft((d) => [...d, p]);
+          else if (m === "polygon" || m === "path" || m === "ruler") setDraft((d) => [...d, p]);
           else info.current?.close();
         });
         const pano = map.getStreetView();
@@ -172,12 +180,13 @@ export default function EarthApp() {
 
   useEffect(() => { mapRef.current?.setMapTypeId(mapType); }, [mapType, ready]);
   useEffect(() => {
-    mapRef.current?.setOptions({ disableDoubleClickZoom: mode === "polygon" || mode === "path", draggableCursor: mode === "none" ? null : "crosshair" });
+    mapRef.current?.setOptions({ disableDoubleClickZoom: mode === "polygon" || mode === "path" || mode === "ruler", draggableCursor: mode === "none" ? null : "crosshair" });
   }, [mode, ready]);
 
   // ---- draft drawing ----
   const finishDraft = useCallback(() => {
     const m = modeRef.current;
+    if (m === "ruler") return;
     setDraft((d) => {
       if (m === "polygon" && d.length >= 3) createFeature("polygon", d);
       else if (m === "path" && d.length >= 2) createFeature("path", d);
@@ -202,7 +211,7 @@ export default function EarthApp() {
     draftOverlay.current?.setMap(null);
     draftOverlay.current = null;
     if (!draft.length) return;
-    const opts = { map: mapRef.current, path: draft, clickable: false, strokeColor: "#facc15", strokeWeight: 2, strokeOpacity: 1 };
+    const opts = { map: mapRef.current, path: draft, clickable: false, strokeColor: mode === "ruler" ? "#f43f5e" : "#facc15", strokeWeight: 2, strokeOpacity: 1 };
     draftOverlay.current = mode === "polygon"
       ? new g.maps.Polygon({ ...opts, fillColor: "#facc15", fillOpacity: 0.2 })
       : new g.maps.Polyline(opts);
@@ -275,17 +284,25 @@ export default function EarthApp() {
       if (n.kind === "marker") {
         const pos = ov.getPosition();
         if (!pos || !sameCoords([{ lat: pos.lat(), lng: pos.lng() }], n.coords.slice(0, 1))) ov.setPosition(n.coords[0]);
-        const icon = ICONS[s.icon];
+        const px = Math.round(32 * s.scale);
+        const iconOpt = s.icon === "triangle"
+          ? { url: TRIANGLE_ICON_URL.replace("http://", "https://"), scaledSize: new g.maps.Size(px, px), anchor: new g.maps.Point(px / 2, px / 2), labelOrigin: new g.maps.Point(px + 4, px / 2) }
+          : (() => {
+              const icon = ICONS[s.icon as keyof typeof ICONS] ?? ICONS.pin;
+              return {
+                path: icon.path, fillColor: s.color, fillOpacity: 1,
+                strokeColor: sel ? "#22d3ee" : "#ffffff", strokeWeight: sel ? 2.5 : 1.5,
+                scale: s.scale * 1.4, anchor: new g.maps.Point(icon.anchor[0], icon.anchor[1]),
+                labelOrigin: new g.maps.Point(30, 10),
+              };
+            })();
         ov.setOptions({
           title: n.name,
           draggable: sel && interactive,
           clickable: interactive,
           zIndex: sel ? 1000 : 1,
-          icon: {
-            path: icon.path, fillColor: s.color, fillOpacity: 1,
-            strokeColor: sel ? "#22d3ee" : "#ffffff", strokeWeight: sel ? 2.5 : 1.5,
-            scale: s.scale, anchor: new g.maps.Point(icon.anchor[0], icon.anchor[1]),
-          },
+          icon: iconOpt,
+          label: n.name ? { text: n.name, color: "#ffffff", fontSize: `${Math.max(9, Math.round(16 * s.scale))}px`, fontWeight: "600", className: "earth-marker-label" } : null,
         });
       } else {
         if (!sameCoords(pathToCoords(ov.getPath()), n.coords)) {
@@ -382,6 +399,7 @@ export default function EarthApp() {
     { id: "marker", label: "Marcador", hint: "Clique no mapa" },
     { id: "polygon", label: "Polígono", hint: "Clique os vértices, duplo clique conclui" },
     { id: "path", label: "Caminho", hint: "Clique os pontos, duplo clique conclui" },
+    { id: "ruler", label: "Régua", hint: "Clique os pontos para medir" },
   ];
 
   return (
@@ -429,6 +447,19 @@ export default function EarthApp() {
           </form>
         </div>
 
+        {mode === "ruler" && (
+          <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
+            <span className="font-mono text-sm">{fmtM(pathLengthM(draft))} m</span>
+            <button className="earth-btn" onClick={() => setDraft([])} disabled={!draft.length}>Limpar</button>
+            <button className="earth-btn-primary" disabled={draft.length < 2} onClick={() => {
+              const v = Math.round(pathLengthM(draft) * 10) / 10;
+              setSavedMeasure(v);
+              toast.success(`Medida guardada: ${fmtM(v)} m`);
+            }}>Guardar medida</button>
+            {savedMeasure != null && <span className="text-xs text-muted-foreground">Guardada: {fmtM(savedMeasure)} m</span>}
+          </div>
+        )}
+
         {(mode === "polygon" || mode === "path") && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
             <span className="text-sm">{draft.length} pontos · duplo clique ou Enter conclui · Esc cancela</span>
@@ -460,6 +491,19 @@ export default function EarthApp() {
             onZoom={() => zoomTo(selected.id)}
             onExport={(f) => onExport(f, selected.id)}
             onClose={() => setSelectedId(null)}
+            onFtth={() => setFtthOpen(true)}
+          />
+        )}
+
+        {ftthOpen && selected && isFeature(selected) && selected.kind === "polygon" && (
+          <FtthDialog
+            currentName={selected.name}
+            currentDescription={selected.description}
+            initialResidences={parseInt(selected.name.match(/RESID[ÊE]NCIAS:\s*(\d+)/i)?.[1] ?? "", 10) || null}
+            shapeLength={polygonCellLength(selected.coords)}
+            savedMeasure={savedMeasure}
+            onApply={(name, description) => dispatch({ type: "update", id: selected.id, patch: { name, description } })}
+            onClose={() => setFtthOpen(false)}
           />
         )}
       </main>
