@@ -9,7 +9,6 @@ import { buildKml, buildKmz, downloadBlob, readGeoFile } from "@/lib/geo/kml";
 import { Sidebar } from "./Sidebar";
 import { Properties } from "./Properties";
 import { FtthDialog } from "./FtthDialog";
-import { TRIANGLE_ICON_URL } from "@/lib/geo/types";
 import {
   MARKER_DEFAULT_NAME, POLYGON_DEFAULT_DESCRIPTION, POLYGON_DEFAULT_NAME,
   fmtM, pathLengthM, polygonCellLength,
@@ -49,11 +48,12 @@ function reducer(state: GeoNode[], a: Action): GeoNode[] {
 
 const STORAGE = "earth-web-nodes-v1";
 
-const ICONS: Record<"pin" | "circle" | "square" | "star", { path: string; anchor: [number, number] }> = {
+const ICONS: Record<"pin" | "circle" | "square" | "star" | "triangle", { path: string; anchor: [number, number] }> = {
   pin: { path: "M12 2C8 2 5 5 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-4-3-7-7-7zm0 4.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z", anchor: [12, 22] },
   circle: { path: "M6 12a6 6 0 1 0 12 0a6 6 0 1 0 -12 0z", anchor: [12, 12] },
   square: { path: "M6 6h12v12H6z", anchor: [12, 12] },
   star: { path: "M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7z", anchor: [12, 12] },
+  triangle: { path: "M12 3L22 20H2z", anchor: [12, 12] },
 };
 
 let loader: Promise<void> | null = null;
@@ -85,6 +85,7 @@ export default function EarthApp() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("none");
   const [draft, setDraft] = useState<LatLng[]>([]);
+  const [zoom, setZoom] = useState(4);
   const [filter, setFilter] = useState<Filter>({ text: "", kinds: { marker: true, polygon: true, path: true } });
   const [mapType, setMapType] = useState("hybrid");
   const [cursor, setCursor] = useState<LatLng | null>(null);
@@ -155,6 +156,7 @@ export default function EarthApp() {
           styles: [{ featureType: "poi", stylers: [{ visibility: "off" }] }],
         });
         mapRef.current = map;
+        map.addListener("zoom_changed", () => setZoom(map.getZoom() ?? 4));
         info.current = new g.maps.InfoWindow();
         map.addListener("mousemove", (e: any) => setCursor({ lat: e.latLng.lat(), lng: e.latLng.lng() }));
         map.addListener("click", (e: any) => {
@@ -244,6 +246,7 @@ export default function EarthApp() {
       ov.__pathListeners = ["set_at", "insert_at", "remove_at"].map((ev) => path.addListener(ev, upd));
     };
 
+    let markerIdx = -1;
     for (const n of nodes) {
       if (!isFeature(n)) continue;
       live.add(n.id);
@@ -284,10 +287,10 @@ export default function EarthApp() {
       if (n.kind === "marker") {
         const pos = ov.getPosition();
         if (!pos || !sameCoords([{ lat: pos.lat(), lng: pos.lng() }], n.coords.slice(0, 1))) ov.setPosition(n.coords[0]);
-        const px = Math.round(32 * s.scale);
-        const iconOpt = s.icon === "triangle"
-          ? { url: TRIANGLE_ICON_URL.replace("http://", "https://"), scaledSize: new g.maps.Size(px, px), anchor: new g.maps.Point(px / 2, px / 2), labelOrigin: new g.maps.Point(px + 4, px / 2) }
-          : (() => {
+        markerIdx++;
+        // Rótulos graduais: zoom alto mostra todos; médio alterna parte; baixo esconde (exceto selecionado)
+        const showLabel = sel || zoom >= 15 || (zoom >= 13 && markerIdx % 2 === 0) || (zoom >= 11 && markerIdx % 6 === 0);
+        const iconOpt = (() => {
               const icon = ICONS[s.icon as keyof typeof ICONS] ?? ICONS.pin;
               return {
                 path: icon.path, fillColor: s.color, fillOpacity: 1,
@@ -302,7 +305,7 @@ export default function EarthApp() {
           clickable: interactive,
           zIndex: sel ? 1000 : 1,
           icon: iconOpt,
-          label: n.name ? { text: n.name, color: "#ffffff", fontSize: `${Math.max(9, Math.round(16 * s.scale))}px`, fontWeight: "600", className: "earth-marker-label" } : null,
+          label: n.name && showLabel ? { text: n.name, color: "#ffffff", fontSize: `${Math.max(9, Math.round(16 * s.scale))}px`, fontWeight: "600", className: "earth-marker-label" } : null,
         });
       } else {
         if (!sameCoords(pathToCoords(ov.getPath()), n.coords)) {
@@ -327,7 +330,7 @@ export default function EarthApp() {
         store.delete(id);
       }
     }
-  }, [nodes, selectedId, filter, ready, mode]);
+  }, [nodes, selectedId, filter, ready, mode, zoom]);
 
   // ---- actions ----
   const zoomTo = useCallback((id: string) => {

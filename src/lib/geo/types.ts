@@ -50,7 +50,7 @@ export function defaultStyle(kind: FeatureKind): FeatureStyle {
   if (kind === "marker")
     return { color: "#ffffff", strokeOpacity: 1, strokeWidth: 1, fillColor: "#ffffff", fillOpacity: 1, scale: 0.8, icon: "triangle" };
   if (kind === "polygon")
-    return { color: "#0000ff", strokeOpacity: 1, strokeWidth: 2, fillColor: "#0000ff", fillOpacity: 0.3, scale: 1, icon: "pin" };
+    return { color: "#ffffff", strokeOpacity: 1, strokeWidth: 1, fillColor: "#0000ff", fillOpacity: 0.3, scale: 1, icon: "pin" };
   return { color: "#f97316", strokeOpacity: 1, strokeWidth: 3, fillColor: "#f97316", fillOpacity: 0, scale: 1, icon: "pin" };
 }
 
