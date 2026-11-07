@@ -309,7 +309,7 @@ export default function EarthApp() {
               return {
                 path: icon.path, fillColor: s.color, fillOpacity: 1,
                 strokeColor: sel ? "#22d3ee" : "#ffffff", strokeWeight: sel ? 2.5 : 1.5,
-                scale: s.scale * 1.4, anchor: new g.maps.Point(icon.anchor[0], icon.anchor[1]),
+                scale: s.scale * 1.4 * zf, anchor: new g.maps.Point(icon.anchor[0], icon.anchor[1]),
                 labelOrigin: new g.maps.Point(30, 10),
               };
             })();
