@@ -67,16 +67,16 @@ describe("Polygon drawing", () => {
   it("creates exactly one polygon when completed in StrictMode", async () => {
     render(<StrictMode><EarthApp /></StrictMode>);
     await waitFor(() => expect(map).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: "Polígono", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Polígono" }));
     clickPoint(-23, -46); clickPoint(-23.001, -46); clickPoint(-23.001, -46.001);
-    fireEvent.click(screen.getByRole("button", { name: "Concluir", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Concluir" }));
     await waitFor(() => expect(savedPolygons()).toHaveLength(1));
     expect(savedPolygons()[0].coords).toHaveLength(3);
   });
   it("consumes double-click completion only once and ignores its repeated point", async () => {
     render(<StrictMode><EarthApp /></StrictMode>);
     await waitFor(() => expect(map).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: "Polígono", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Polígono" }));
     clickPoint(-23, -46); clickPoint(-23.001, -46); clickPoint(-23.001, -46.001);
     clickPoint(-23.001, -46.001);
     act(() => { map.emit("dblclick"); map.emit("dblclick"); });
@@ -86,10 +86,10 @@ describe("Polygon drawing", () => {
   it("cancels the draft without saving a polygon", async () => {
     render(<StrictMode><EarthApp /></StrictMode>);
     await waitFor(() => expect(map).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: "Polígono", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Polígono" }));
     clickPoint(-23, -46); clickPoint(-23.001, -46); clickPoint(-23.001, -46.001);
-    fireEvent.keyDown(window, { key: "Escape" });
-    fireEvent.keyDown(window, { key: "Enter" });
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.keyDown(document.body, { key: "Enter" });
     expect(savedPolygons()).toHaveLength(0);
   });
 });

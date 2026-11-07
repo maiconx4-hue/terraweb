@@ -5,7 +5,7 @@ export function showDraftVertices(google: any, map: any, coords: LatLng[]) {
   class Vertices extends google.maps.OverlayView {
     elements: HTMLDivElement[] = [];
     onAdd() {
-      const pane = this.getPanes()?.overlayLayer;
+      const pane = this["getPanes"]()?.overlayLayer;
       if (!pane) return;
       this.elements = coords.map((_, i) => {
         const element = document.createElement("div");
@@ -17,7 +17,7 @@ export function showDraftVertices(google: any, map: any, coords: LatLng[]) {
       });
     }
     draw() {
-      const projection = this.getProjection();
+      const projection = this["getProjection"]();
       if (!projection) return;
       coords.forEach((point, i) => {
         const pixel = projection.fromLatLngToDivPixel(new google.maps.LatLng(point.lat, point.lng));
@@ -30,6 +30,6 @@ export function showDraftVertices(google: any, map: any, coords: LatLng[]) {
     onRemove() { this.elements.forEach((element) => element.remove()); this.elements = []; }
   }
   const overlay = new Vertices();
-  overlay.setMap(map);
-  return () => overlay.setMap(null);
+  overlay["setMap"](map);
+  return () => overlay["setMap"](null);
 }
