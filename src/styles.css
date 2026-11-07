@@ -209,3 +209,29 @@ body { font-family: var(--font-sans); }
   .earth-pre { @apply whitespace-pre-wrap rounded border border-border p-2 font-mono text-[11px]; }
 }
 .earth-marker-label { text-shadow: 0 0 2px #000, 0 0 3px #000; transform: translateX(50%); white-space: nowrap; }
+
+.earth-draft-vertex {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--primary-foreground);
+  background: var(--primary);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.earth-draft-vertex-new::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border: 2px solid var(--primary);
+  border-radius: 50%;
+  animation: earth-vertex-pulse 500ms ease-out both;
+}
+@keyframes earth-vertex-pulse {
+  from { transform: scale(0.8); opacity: 0.7; }
+  to { transform: scale(1.8); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .earth-draft-vertex-new::after { animation: none; opacity: 0; }
+}

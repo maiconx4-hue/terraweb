@@ -9,6 +9,7 @@ import { buildKml, buildKmz, downloadBlob, readGeoFile } from "@/lib/geo/kml";
 import { Sidebar } from "./Sidebar";
 import { Properties } from "./Properties";
 import { FtthDialog } from "./FtthDialog";
+import { showDraftVertices } from "./draftVertices";
 import {
   MARKER_DEFAULT_NAME, POLYGON_DEFAULT_DESCRIPTION, POLYGON_DEFAULT_NAME,
   fmtM, pathLengthM, polygonCellLength,
@@ -85,6 +86,12 @@ export default function EarthApp() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("none");
   const [draft, setDraft] = useState<LatLng[]>([]);
+  const draftRef = useRef<LatLng[]>([]);
+  const updateDraft = useCallback((value: LatLng[] | ((previous: LatLng[]) => LatLng[])) => {
+    const next = typeof value === "function" ? value(draftRef.current) : value;
+    draftRef.current = next;
+    setDraft(next);
+  }, []);
   const [zoom, setZoom] = useState(4);
   const [filter, setFilter] = useState<Filter>({ text: "", kinds: { marker: true, polygon: true, path: true } });
   const [mapType, setMapType] = useState("hybrid");
@@ -168,7 +175,10 @@ export default function EarthApp() {
           const m = modeRef.current;
           const p = { lat: e.latLng.lat(), lng: e.latLng.lng() };
           if (m === "marker") createFeature("marker", [p]);
-          else if (m === "polygon" || m === "path" || m === "ruler") setDraft((d) => [...d, p]);
+          else if (m === "polygon" || m === "path" || m === "ruler") updateDraft((d) => {
+            const last = d.at(-1);
+            return last && last.lat === p.lat && last.lng === p.lng ? d : [...d, p];
+          });
           else info.current?.close();
         });
         const pano = map.getStreetView();
@@ -183,7 +193,7 @@ export default function EarthApp() {
       })
       .catch((e) => toast.error(e.message));
     return () => { cancelled = true; };
-  }, [createFeature]);
+  }, [createFeature, updateDraft]);
 
   useEffect(() => { mapRef.current?.setMapTypeId(mapType); }, [mapType, ready]);
   useEffect(() => {
@@ -193,15 +203,17 @@ export default function EarthApp() {
   // ---- draft drawing ----
   const finishDraft = useCallback(() => {
     const m = modeRef.current;
-    if (m === "ruler") return;
-    setDraft((d) => {
-      if (m === "polygon" && d.length >= 3) createFeature("polygon", d);
-      else if (m === "path" && d.length >= 2) createFeature("path", d);
-      else if (d.length) toast.message(m === "polygon" ? "Um polígono precisa de 3 pontos" : "Um caminho precisa de 2 pontos");
-      return [];
-    });
+    if (m !== "polygon" && m !== "path") return;
+    const points = draftRef.current;
+    // Consume the draft before dispatching: React may replay state updaters,
+    // and completion can arrive twice before the next render.
+    modeRef.current = "none";
+    updateDraft([]);
+    if (m === "polygon" && points.length >= 3) createFeature("polygon", points);
+    else if (m === "path" && points.length >= 2) createFeature("path", points);
+    else if (points.length) toast.message(m === "polygon" ? "Um polígono precisa de 3 pontos" : "Um caminho precisa de 2 pontos");
     setMode("none");
-  }, [createFeature]);
+  }, [createFeature, updateDraft]);
 
   useEffect(() => {
     if (!ready) return;
@@ -225,15 +237,20 @@ export default function EarthApp() {
   }, [draft, mode, ready]);
 
   useEffect(() => {
+    if (!ready || mode !== "polygon" || !draft.length) return;
+    return showDraftVertices(window.google, mapRef.current, draft);
+  }, [draft, mode, ready]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.closest("input,textarea,select")) return;
-      if (e.key === "Escape") { setDraft([]); setMode("none"); }
+      if (e.key === "Escape") { updateDraft([]); modeRef.current = "none"; setMode("none"); }
       if (e.key === "Enter") finishDraft();
-      if (e.key === "Backspace" && draft.length) setDraft((d) => d.slice(0, -1));
+      if (e.key === "Backspace" && draft.length) updateDraft((d) => d.slice(0, -1));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [finishDraft, draft.length]);
+  }, [finishDraft, draft.length, updateDraft]);
 
   // ---- overlay sync ----
   useEffect(() => {
@@ -445,7 +462,7 @@ export default function EarthApp() {
                 key={t.id}
                 title={t.hint}
                 data-active={mode === t.id}
-                onClick={() => { setDraft([]); setMode(t.id); }}
+                onClick={() => { updateDraft([]); modeRef.current = t.id; setMode(t.id); }}
                 className="earth-seg-btn"
               >
                 {t.label}
@@ -467,7 +484,7 @@ export default function EarthApp() {
         {mode === "ruler" && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
             <span className="font-mono text-sm">{fmtM(pathLengthM(draft))} m</span>
-            <button className="earth-btn" onClick={() => setDraft([])} disabled={!draft.length}>Limpar</button>
+            <button className="earth-btn" onClick={() => updateDraft([])} disabled={!draft.length}>Limpar</button>
             <button className="earth-btn-primary" disabled={draft.length < 2} onClick={() => {
               const v = Math.round(pathLengthM(draft) * 10) / 10;
               setSavedMeasure(v);
@@ -480,7 +497,7 @@ export default function EarthApp() {
         {(mode === "polygon" || mode === "path") && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
             <span className="text-sm">{draft.length} pontos · duplo clique ou Enter conclui · Esc cancela</span>
-            <button className="earth-btn" onClick={() => setDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Desfazer</button>
+            <button className="earth-btn" onClick={() => updateDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Desfazer</button>
             <button className="earth-btn-primary" onClick={finishDraft}>Concluir</button>
           </div>
         )}
