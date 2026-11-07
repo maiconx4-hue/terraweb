@@ -312,13 +312,14 @@ export default function EarthApp() {
         markerIdx++;
         // Rótulos graduais: zoom alto mostra todos; médio alterna parte; baixo esconde (exceto selecionado)
         void markerIdx;
-        const showLabel = sel || zoom >= 19;
-        // Tamanho gradual pelo zoom: visão geral = ícones pequenos, perto = tamanho total
-        const zf = sel ? 1 : Math.min(1, Math.max(0.3, 0.3 + (zoom - 11) * (0.7 / 6)));
-        const px = Math.max(6, Math.round(32 * s.scale * zf));
+        // Como no Google Earth Pro (~293 m de altitude ≈ zoom 18): todos os rótulos visíveis
+        const showLabel = sel || zoom >= 18;
+        // Tamanho gradual pelo zoom: visão geral = ícones pequenos, perto (zoom ≥ 17) = tamanho Earth Pro
+        const zf = sel ? 1.6 : Math.min(1, Math.max(0.4, 0.4 + (zoom - 11) * (0.6 / 6)));
+        const px = Math.max(6, Math.round(20 * s.scale * zf));
         const iconOpt = s.icon === "triangle" ? {
           url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(
-            `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path fill="${s.color}" stroke="${sel ? "#22d3ee" : "#000"}" stroke-width="${sel ? 4 : 2}" stroke-linejoin="round" d="M32 6 L60 56 L4 56 Z"/></svg>`),
+            `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">${sel ? `<rect x="2" y="2" width="60" height="60" fill="none" stroke="#facc15" stroke-width="5"/>` : ""}<path fill="${s.color}" stroke="#000" stroke-width="2" stroke-linejoin="round" d="${sel ? "M32 14 L52 50 L12 50 Z" : "M32 6 L60 56 L4 56 Z"}"/></svg>`),
           scaledSize: new g.maps.Size(px, px), anchor: new g.maps.Point(px / 2, px / 2),
           labelOrigin: new g.maps.Point(px + 4, px / 2),
         } : (() => {
@@ -336,7 +337,7 @@ export default function EarthApp() {
           clickable: interactive,
           zIndex: sel ? 1000 : 1,
           icon: iconOpt,
-          label: n.name && showLabel ? { text: n.name, color: "#ffffff", fontSize: `${Math.max(9, Math.round(16 * s.scale))}px`, fontWeight: "600", className: "earth-marker-label" } : null,
+          label: n.name && showLabel ? { text: n.name, color: "#ffffff", fontSize: `${Math.max(9, Math.round(13 * s.scale))}px`, fontWeight: "500", className: "earth-marker-label" } : null,
         });
       } else {
         if (!sameCoords(pathToCoords(ov.getPath()), n.coords)) {
