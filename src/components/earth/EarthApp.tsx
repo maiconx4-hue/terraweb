@@ -296,10 +296,12 @@ export default function EarthApp() {
         // Rótulos graduais: zoom alto mostra todos; médio alterna parte; baixo esconde (exceto selecionado)
         void markerIdx;
         const showLabel = sel || zoom >= 19;
-        const px = Math.round(32 * s.scale);
+        // Tamanho gradual pelo zoom: visão geral = ícones pequenos, perto = tamanho total
+        const zf = sel ? 1 : Math.min(1, Math.max(0.3, 0.3 + (zoom - 11) * (0.7 / 6)));
+        const px = Math.max(6, Math.round(32 * s.scale * zf));
         const iconOpt = s.icon === "triangle" ? {
           url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(
-            `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path fill-rule="evenodd" fill="${s.color}" stroke="${sel ? "#22d3ee" : "#000"}" stroke-width="${sel ? 3 : 1.5}" stroke-linejoin="round" d="M32 2 L60 48 L4 48 Z M32 25 L16 37 L48 37 Z"/></svg>`),
+            `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path fill="${s.color}" stroke="${sel ? "#22d3ee" : "#000"}" stroke-width="${sel ? 4 : 2}" stroke-linejoin="round" d="M32 6 L60 56 L4 56 Z"/></svg>`),
           scaledSize: new g.maps.Size(px, px), anchor: new g.maps.Point(px / 2, px / 2),
           labelOrigin: new g.maps.Point(px + 4, px / 2),
         } : (() => {
@@ -307,7 +309,7 @@ export default function EarthApp() {
               return {
                 path: icon.path, fillColor: s.color, fillOpacity: 1,
                 strokeColor: sel ? "#22d3ee" : "#ffffff", strokeWeight: sel ? 2.5 : 1.5,
-                scale: s.scale * 1.4, anchor: new g.maps.Point(icon.anchor[0], icon.anchor[1]),
+                scale: s.scale * 1.4 * zf, anchor: new g.maps.Point(icon.anchor[0], icon.anchor[1]),
                 labelOrigin: new g.maps.Point(30, 10),
               };
             })();
