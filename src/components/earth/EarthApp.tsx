@@ -294,8 +294,15 @@ export default function EarthApp() {
         if (!pos || !sameCoords([{ lat: pos.lat(), lng: pos.lng() }], n.coords.slice(0, 1))) ov.setPosition(n.coords[0]);
         markerIdx++;
         // Rótulos graduais: zoom alto mostra todos; médio alterna parte; baixo esconde (exceto selecionado)
-        const showLabel = sel || zoom >= 15 || (zoom >= 13 && markerIdx % 2 === 0) || (zoom >= 11 && markerIdx % 6 === 0);
-        const iconOpt = (() => {
+        void markerIdx;
+        const showLabel = sel || zoom >= 19;
+        const px = Math.round(32 * s.scale);
+        const iconOpt = s.icon === "triangle" ? {
+          url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path fill-rule="evenodd" fill="${s.color}" stroke="${sel ? "#22d3ee" : "#000"}" stroke-width="${sel ? 3 : 1.5}" stroke-linejoin="round" d="M32 2 L60 48 L4 48 Z M32 25 L16 37 L48 37 Z"/></svg>`),
+          scaledSize: new g.maps.Size(px, px), anchor: new g.maps.Point(px / 2, px / 2),
+          labelOrigin: new g.maps.Point(px + 4, px / 2),
+        } : (() => {
               const icon = ICONS[s.icon as keyof typeof ICONS] ?? ICONS.pin;
               return {
                 path: icon.path, fillColor: s.color, fillOpacity: 1,
