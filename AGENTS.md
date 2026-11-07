@@ -9,3 +9,4 @@
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
 - Map features are stored client-side (localStorage) as a flat node list with parentId folders; KML/KMZ I/O lives in src/lib/geo/kml.ts. Why: offline-friendly, no backend needed.
+- Consume drawing drafts synchronously and create features outside React state updaters; Google Maps OverlayView provides temporary vertex feedback. Why: prevent replayed completion from duplicating features and keep feedback aligned during map movement.
