@@ -73,4 +73,23 @@ describe("Polygon drawing", () => {
     await waitFor(() => expect(savedPolygons()).toHaveLength(1));
     expect(savedPolygons()[0].coords).toHaveLength(3);
   });
+  it("consumes double-click completion only once and ignores its repeated point", async () => {
+    render(<StrictMode><EarthApp /></StrictMode>);
+    await waitFor(() => expect(map).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Polígono", exact: true }));
+    clickPoint(-23, -46); clickPoint(-23.001, -46); clickPoint(-23.001, -46.001);
+    clickPoint(-23.001, -46.001);
+    act(() => { map.emit("dblclick"); map.emit("dblclick"); });
+    await waitFor(() => expect(savedPolygons()).toHaveLength(1));
+    expect(savedPolygons()[0].coords).toHaveLength(3);
+  });
+  it("cancels the draft without saving a polygon", async () => {
+    render(<StrictMode><EarthApp /></StrictMode>);
+    await waitFor(() => expect(map).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Polígono", exact: true }));
+    clickPoint(-23, -46); clickPoint(-23.001, -46); clickPoint(-23.001, -46.001);
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(savedPolygons()).toHaveLength(0);
+  });
 });
