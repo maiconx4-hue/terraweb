@@ -118,9 +118,13 @@ export default function EarthApp() {
     try {
       const raw = localStorage.getItem(STORAGE);
       if (raw) {
-        const parsed = (JSON.parse(raw) as GeoNode[]).map((n) =>
-          n.kind === "polygon" ? { ...n, style: { ...n.style, color: "#ffffff", strokeWidth: 1, strokeOpacity: 1 } } : n,
-        );
+        const parsed = (JSON.parse(raw) as GeoNode[]).map((n) => {
+          if (n.kind === "polygon") return { ...n, style: { ...n.style, color: "#ffffff", strokeWidth: 1, strokeOpacity: 1 } };
+          // marcadores criados antes do padrão vermelho (branco) passam a ser vermelhos
+          if (n.kind === "marker" && n.style.color.toLowerCase() === "#ffffff")
+            return { ...n, style: { ...n.style, color: "#ff0000", fillColor: "#ff0000" } };
+          return n;
+        });
         dispatch({ type: "set", nodes: parsed });
       }
     } catch { /* ignore */ }

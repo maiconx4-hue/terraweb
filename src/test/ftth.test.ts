@@ -23,6 +23,12 @@ describe("FTTH rules", () => {
     expect(rateStatus(61)).toBe("high");
   });
   it("odd length halves", () => expect(ftthDescription(10, 1, 175)).toContain("175M / 2 = 87,5M - UM"));
+  it("new marker defaults: red triangle at 0.8", () => {
+    const s = defaultStyle("marker");
+    expect(s.color).toBe("#ff0000");
+    expect(s.icon).toBe("triangle");
+    expect(s.scale).toBe(0.8);
+  });
   it("rectangle length ≈ long side", () => {
     // ~200m x ~100m near equator
     const dLat = 100 / 111195, dLng = 200 / 111195;
