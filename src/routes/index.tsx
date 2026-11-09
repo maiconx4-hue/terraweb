@@ -1,8 +1,4 @@
-import { createFileRoute, ClientOnly } from "@tanstack/react-router";
-import { lazy, Suspense } from "react";
-import { Toaster } from "@/components/ui/sonner";
-
-const EarthApp = lazy(() => import("@/components/earth/EarthApp"));
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -15,22 +11,8 @@ export const Route = createFileRoute("/")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: Index,
+  beforeLoad: () => {
+    throw redirect({ to: "/mapa" });
+  },
+  component: () => null,
 });
-
-function Loading() {
-  return <div className="flex h-screen items-center justify-center bg-background text-muted-foreground">Carregando o globo…</div>;
-}
-
-function Index() {
-  return (
-    <>
-      <ClientOnly fallback={<Loading />}>
-        <Suspense fallback={<Loading />}>
-          <EarthApp />
-        </Suspense>
-      </ClientOnly>
-      <Toaster position="top-right" />
-    </>
-  );
-}
