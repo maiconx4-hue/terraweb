@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { displayRate, ftthDescription, ftthTitle, polygonCellLength, rateStatus, rawRate } from "@/lib/geo/ftth";
+import { defaultStyle } from "@/lib/geo/types";
 
 describe("FTTH rules", () => {
   it("19 residences, 1 CTO, 180 m", () => {
