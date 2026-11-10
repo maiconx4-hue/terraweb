@@ -10,6 +10,7 @@ import { buildKml, buildKmz, downloadBlob, readGeoFile } from "@/lib/geo/kml";
 import { Sidebar } from "./Sidebar";
 import { Properties } from "./Properties";
 import { FtthDialog } from "./FtthDialog";
+import { StreetViewMiniMap } from "./StreetViewMiniMap";
 import { showDraftVertices } from "./draftVertices";
 import {
   MARKER_DEFAULT_NAME, POLYGON_DEFAULT_DESCRIPTION, POLYGON_DEFAULT_NAME,
@@ -546,6 +547,13 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
             <button className="earth-btn" onClick={() => addSvMarker(false)}>+ Marcador aqui</button>
             <button className="earth-btn-primary" onClick={() => addSvMarker(true)}>+ Marcador à frente</button>
           </div>
+        )}
+
+        {sv.visible && sv.pos && (
+          <StreetViewMiniMap
+            pos={sv.pos} heading={sv.heading} nodes={nodes} filter={filter}
+            onMove={(p) => mapRef.current?.getStreetView().setPosition(p)}
+          />
         )}
 
         <div className="earth-status">
