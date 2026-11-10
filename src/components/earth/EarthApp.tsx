@@ -518,6 +518,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         {mode === "ruler" && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
             <span className="font-mono text-sm">{fmtM(pathLengthM(draft))} m</span>
+            <button className="earth-btn" onClick={() => updateDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Desfazer</button>
             <button className="earth-btn" onClick={() => updateDraft([])} disabled={!draft.length}>Limpar</button>
             <button className="earth-btn-primary" disabled={draft.length < 2} onClick={() => {
               const v = Math.round(pathLengthM(draft) * 10) / 10;
@@ -525,6 +526,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               toast.success(`Medida guardada: ${fmtM(v)} m`);
             }}>Guardar medida</button>
             {savedMeasure != null && <span className="text-xs text-muted-foreground">Guardada: {fmtM(savedMeasure)} m</span>}
+            {savedMeasure != null && <button className="earth-btn" onClick={() => { setSavedMeasure(null); toast.success("Medida guardada apagada"); }}>Limpar guardada</button>}
           </div>
         )}
 
