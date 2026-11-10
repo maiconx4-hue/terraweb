@@ -1,3 +1,4 @@
+import { supabase } from "@/integrations/supabase/client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -47,7 +48,7 @@ function reducer(state: GeoNode[], a: Action): GeoNode[] {
   }
 }
 
-const STORAGE = "earth-web-nodes-v1";
+const STORAGE_BASE = "earth-web-nodes-v1";
 
 const ICONS: Record<"pin" | "circle" | "square" | "star" | "triangle", { path: string; anchor: [number, number] }> = {
   pin: { path: "M12 2C8 2 5 5 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-4-3-7-7-7zm0 4.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z", anchor: [12, 22] },
@@ -79,7 +80,9 @@ const sameCoords = (a: LatLng[], b: LatLng[]) =>
 
 const pathToCoords = (path: any): LatLng[] => path.getArray().map((p: any) => ({ lat: p.lat(), lng: p.lng() }));
 
-export default function EarthApp() {
+export default function EarthApp({ userId, userEmail }: { userId?: string; userEmail?: string } = {}) {
+  const STORAGE = userId ? `${STORAGE_BASE}-${userId}` : STORAGE_BASE;
+  const VIEW_KEY = `${STORAGE}-view`;
   const [nodes, dispatch] = useReducer(reducer, []);
   const [loaded, setLoaded] = useState(false);
   const [ready, setReady] = useState(false);
@@ -128,11 +131,24 @@ export default function EarthApp() {
         dispatch({ type: "set", nodes: parsed });
       }
     } catch { /* ignore */ }
-    setLoaded(true);
-  }, []);
+    if (!userId) { setLoaded(true); return; }
+    // projeto do usuário na nuvem (prevalece sobre a cópia local)
+    supabase.from("projects").select("nodes").eq("owner_id", userId).maybeSingle().then(({ data }) => {
+      const cloud = data?.nodes as unknown as GeoNode[] | undefined;
+      if (cloud && cloud.length) dispatch({ type: "set", nodes: cloud });
+      setLoaded(true);
+    }, () => setLoaded(true));
+  }, [STORAGE, userId]);
   useEffect(() => {
-    if (loaded) localStorage.setItem(STORAGE, JSON.stringify(nodes));
-  }, [nodes, loaded]);
+    if (!loaded) return;
+    localStorage.setItem(STORAGE, JSON.stringify(nodes));
+    if (!userId) return;
+    const t = setTimeout(() => {
+      supabase.from("projects").upsert({ owner_id: userId, nodes: nodes as any, updated_at: new Date().toISOString() }, { onConflict: "owner_id" })
+        .then(({ error }) => { if (error) console.error(error); });
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [nodes, loaded, STORAGE, userId]);
 
   const targetFolder = useCallback((): string | null => {
     const sel = nodesRef.current.find((n) => n.id === selectedRef.current);
@@ -160,8 +176,10 @@ export default function EarthApp() {
         if (cancelled || !mapDiv.current) return;
         const g = window.google;
         const map = new g.maps.Map(mapDiv.current, {
-          center: { lat: -15.78, lng: -47.93 },
-          zoom: 4,
+          ...(() => {
+            try { const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? ""); if (v?.center && v.zoom) return { center: v.center, zoom: v.zoom }; } catch { /* sem vista salva */ }
+            return { center: { lat: -15.78, lng: -47.93 }, zoom: 4 };
+          })(),
           mapTypeId: "hybrid",
           tilt: 45,
           clickableIcons: false,
@@ -172,7 +190,12 @@ export default function EarthApp() {
           styles: [{ featureType: "poi", stylers: [{ visibility: "off" }] }],
         });
         mapRef.current = map;
+        setZoom(map.getZoom?.() ?? 4);
         map.addListener("zoom_changed", () => setZoom(map.getZoom() ?? 4));
+        map.addListener("idle", () => {
+          const c = map.getCenter();
+          if (c) localStorage.setItem(VIEW_KEY, JSON.stringify({ center: { lat: c.lat(), lng: c.lng() }, zoom: map.getZoom(), mapTypeId: map.getMapTypeId() }));
+        });
         info.current = new g.maps.InfoWindow();
         map.addListener("mousemove", (e: any) => setCursor({ lat: e.latLng.lat(), lng: e.latLng.lng() }));
         map.addListener("click", (e: any) => {
@@ -459,6 +482,12 @@ export default function EarthApp() {
 
       <main className="earth-main">
         <div ref={mapDiv} className="earth-map" />
+        {userId && (
+          <a href="/conta" target="_blank" rel="noopener" title={`${userEmail ?? ""} — abrir conta em nova aba`} aria-label="Minha conta"
+            className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-md hover:bg-muted">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></svg>
+          </a>
+        )}
 
         <div className="earth-toolbar">
           <div className="earth-seg">
