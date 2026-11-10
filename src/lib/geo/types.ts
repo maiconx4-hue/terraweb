@@ -48,7 +48,7 @@ export function uid() {
 
 export function defaultStyle(kind: FeatureKind): FeatureStyle {
   if (kind === "marker")
-    return { color: "#ff0000", strokeOpacity: 1, strokeWidth: 1, fillColor: "#ff0000", fillOpacity: 1, scale: 0.8, icon: "triangle" };
+    return { color: "#c60000", strokeOpacity: 1, strokeWidth: 1, fillColor: "#c60000", fillOpacity: 1, scale: 0.8, icon: "triangle" };
   if (kind === "polygon")
     return { color: "#ffffff", strokeOpacity: 1, strokeWidth: 1, fillColor: "#0000ff", fillOpacity: 0.3, scale: 1, icon: "pin" };
   return { color: "#f97316", strokeOpacity: 1, strokeWidth: 3, fillColor: "#f97316", fillOpacity: 0, scale: 1, icon: "pin" };

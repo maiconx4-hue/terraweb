@@ -26,7 +26,7 @@ describe("FTTH rules", () => {
   it("odd length halves", () => expect(ftthDescription(10, 1, 175)).toContain("175M / 2 = 87,5M - UM"));
   it("new marker defaults: red triangle at 0.8", () => {
     const s = defaultStyle("marker");
-    expect(s.color).toBe("#ff0000");
+    expect(s.color).toBe("#c60000");
     expect(s.icon).toBe("triangle");
     expect(s.scale).toBe(0.8);
   });
