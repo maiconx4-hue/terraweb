@@ -190,7 +190,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           styles: [{ featureType: "poi", stylers: [{ visibility: "off" }] }],
         });
         mapRef.current = map;
-        setZoom(map.getZoom() ?? 4);
+        setZoom(map.getZoom?.() ?? 4);
         map.addListener("zoom_changed", () => setZoom(map.getZoom() ?? 4));
         map.addListener("idle", () => {
           const c = map.getCenter();
