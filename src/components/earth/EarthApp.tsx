@@ -124,8 +124,8 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         const parsed = (JSON.parse(raw) as GeoNode[]).map((n) => {
           if (n.kind === "polygon") return { ...n, style: { ...n.style, color: "#ffffff", strokeWidth: 1, strokeOpacity: 1 } };
           // marcadores criados antes do padrão vermelho (branco) passam a ser vermelhos
-          if (n.kind === "marker" && n.style.color.toLowerCase() === "#ffffff")
-            return { ...n, style: { ...n.style, color: "#ff0000", fillColor: "#ff0000" } };
+          if (n.kind === "marker" && ["#ffffff","#ff0000"].includes(n.style.color.toLowerCase()))
+            return { ...n, style: { ...n.style, color: "#c60000", fillColor: "#c60000" } };
           return n;
         });
         dispatch({ type: "set", nodes: parsed });
@@ -264,7 +264,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   }, [draft, mode, ready]);
 
   useEffect(() => {
-    if (!ready || mode !== "polygon" || !draft.length) return;
+    if (!ready || (mode !== "polygon" && mode !== "ruler") || !draft.length) return;
     return showDraftVertices(window.google, mapRef.current, draft);
   }, [draft, mode, ready]);
 
@@ -518,6 +518,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         {mode === "ruler" && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
             <span className="font-mono text-sm">{fmtM(pathLengthM(draft))} m</span>
+            <button className="earth-btn" onClick={() => updateDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Desfazer</button>
             <button className="earth-btn" onClick={() => updateDraft([])} disabled={!draft.length}>Limpar</button>
             <button className="earth-btn-primary" disabled={draft.length < 2} onClick={() => {
               const v = Math.round(pathLengthM(draft) * 10) / 10;
@@ -525,6 +526,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               toast.success(`Medida guardada: ${fmtM(v)} m`);
             }}>Guardar medida</button>
             {savedMeasure != null && <span className="text-xs text-muted-foreground">Guardada: {fmtM(savedMeasure)} m</span>}
+            {savedMeasure != null && <button className="earth-btn" onClick={() => { setSavedMeasure(null); toast.success("Medida guardada apagada"); }}>Limpar guardada</button>}
           </div>
         )}
 
