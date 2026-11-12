@@ -235,3 +235,12 @@ body { font-family: var(--font-sans); }
 @media (prefers-reduced-motion: reduce) {
   .earth-draft-vertex-new::after { animation: none; opacity: 0; }
 }
+
+
+/* Ferramentas compactas: ícones com alvo acessível e tooltip nativo. */
+.earth-toolbar .earth-tool-icon {
+  @apply inline-flex size-8 items-center justify-center rounded-md px-0 py-0;
+}
+.earth-toolbar .earth-tool-icon[data-active="true"] {
+  @apply bg-primary text-primary-foreground;
+}
