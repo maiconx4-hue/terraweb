@@ -31,7 +31,8 @@ type Action =
   | { type: "add"; nodes: GeoNode[] }
   | { type: "update"; id: string; patch: Partial<GeoNode> }
   | { type: "remove"; id: string }
-  | { type: "move"; id: string; parentId: string | null };
+  | { type: "move"; id: string; parentId: string | null }
+  | { type: "moveMany"; ids: string[]; parentId: string | null };
 
 function reducer(state: GeoNode[], a: Action): GeoNode[] {
   switch (a.type) {
@@ -46,6 +47,40 @@ function reducer(state: GeoNode[], a: Action): GeoNode[] {
       if (a.parentId && descendantIds(state, a.id).has(a.parentId)) return state;
       return state.map((n) => (n.id === a.id ? { ...n, parentId: a.parentId } : n));
     }
+
+    case "moveMany": {
+  const selected = new Set(a.ids);
+
+  // Evita mover individualmente os descendentes
+  // quando a pasta ancestral também está selecionada.
+  const roots = a.ids.filter((id) => {
+    let current = state.find((n) => n.id === id);
+
+    while (current?.parentId) {
+      if (selected.has(current.parentId)) return false;
+
+      current = state.find((n) => n.id === current!.parentId);
+    }
+
+    return true;
+  });
+
+  // Impede movimentação circular.
+  if (
+    a.parentId &&
+    roots.some((id) => descendantIds(state, id).has(a.parentId!))
+  ) {
+    return state;
+  }
+
+  const moving = new Set(roots);
+
+  return state.map((n) =>
+    moving.has(n.id)
+      ? { ...n, parentId: a.parentId }
+      : n
+  );
+}  
   }
 }
 
@@ -476,6 +511,9 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         onZoom={zoomTo}
         onToggle={(id, patch) => dispatch({ type: "update", id, patch })}
         onMove={(id, parentId) => dispatch({ type: "move", id, parentId })}
+        onMoveMany={(ids, parentId) =>
+        dispatch({ type: "moveMany", ids, parentId })
+        }
         onAddFolder={addFolder}
         onImport={onImport}
         onExport={(f) => onExport(f)}
