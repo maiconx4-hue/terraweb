@@ -11,6 +11,7 @@ import { Sidebar } from "./Sidebar";
 import { Properties } from "./Properties";
 import { FtthDialog } from "./FtthDialog";
 import { StreetViewMiniMap } from "./StreetViewMiniMap";
+import { Map3DView } from "./Map3DView";
 import { showDraftVertices } from "./draftVertices";
 import {
   MARKER_DEFAULT_NAME, POLYGON_DEFAULT_DESCRIPTION, POLYGON_DEFAULT_NAME,
@@ -114,6 +115,9 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   const [zoom, setZoom] = useState(4);
   const [filter, setFilter] = useState<Filter>({ text: "", kinds: { marker: true, polygon: true, path: true } });
   const [mapType, setMapType] = useState("hybrid");
+  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  const [hasOpened3D, setHasOpened3D] = useState(false);
+  const [focus3D, setFocus3D] = useState<{ center: LatLng; nonce: number } | null>(null);
   const [sv, setSv] = useState<{ visible: boolean; pos: LatLng | null; heading: number }>({ visible: false, pos: null, heading: 0 });
   const [goto, setGoto] = useState("");
   const [ftthOpen, setFtthOpen] = useState(false);
@@ -199,13 +203,19 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
             return { center: { lat: -15.78, lng: -47.93 }, zoom: 4 };
           })(),
           mapTypeId: "hybrid",
-          tilt: 45,
+          // VECTOR habilita WebGL, zoom fracionário e interações modernas.
+          // O DEMO_MAP_ID é fallback de desenvolvimento; configure VITE_GOOGLE_MAP_ID
+          // com um Map ID próprio no Google Cloud para produção.
+          mapId: import.meta.env["VITE_GOOGLE_MAP_ID"] || g.maps.Map.DEMO_MAP_ID,
+          renderingType: g.maps.RenderingType?.VECTOR ?? "VECTOR",
+          isFractionalZoomEnabled: true,
+          tiltInteractionEnabled: true,
+          headingInteractionEnabled: true,
           clickableIcons: false,
           streetViewControl: true,
           fullscreenControl: false,
           mapTypeControl: false,
           rotateControl: true,
-          styles: [{ featureType: "poi", stylers: [{ visibility: "off" }] }],
         });
         mapRef.current = map;
         setZoom(map.getZoom?.() ?? 4);
@@ -259,6 +269,13 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   }, [createFeature, updateDraft]);
 
   useEffect(() => { mapRef.current?.setMapTypeId(mapType); }, [mapType, ready]);
+
+  useEffect(() => {
+    if (viewMode === "2d" && ready && mapRef.current) {
+      // O mapa 2D permanece montado durante a exploração 3D.
+      window.setTimeout(() => window.google?.maps?.event?.trigger(mapRef.current, "resize"), 0);
+    }
+  }, [viewMode, ready]);
   useEffect(() => {
     mapRef.current?.setOptions({ disableDoubleClickZoom: mode === "polygon" || mode === "path" || mode === "ruler", draggableCursor: mode === "none" ? null : "crosshair" });
   }, [mode, ready]);
@@ -435,12 +452,17 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
     const ids = descendantIds(nodesRef.current, id);
     const pts = nodesRef.current.filter((n) => ids.has(n.id) && isFeature(n)).flatMap((n) => (n as FeatureNode).coords);
     if (!pts.length) return;
+    if (viewMode === "3d") {
+      const center = pts.reduce((acc, point) => ({ lat: acc.lat + point.lat / pts.length, lng: acc.lng + point.lng / pts.length }), { lat: 0, lng: 0 });
+      setFocus3D({ center, nonce: Date.now() });
+      return;
+    }
     if (map.getStreetView().getVisible()) map.getStreetView().setVisible(false);
     if (pts.length === 1) { map.setCenter(pts[0]!); map.setZoom(18); return; }
     const b = new g.maps.LatLngBounds();
     pts.forEach((p) => b.extend(p));
     map.fitBounds(b, 60);
-  }, []);
+  }, [viewMode]);
 
   const addFolder = () => {
     const f: GeoNode = { id: uid(), kind: "folder", name: "Nova pasta", description: "", parentId: targetFolder(), visible: true, open: true };
@@ -489,6 +511,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
     mapRef.current?.getStreetView().setVisible(false);
     mapRef.current?.setCenter(p);
     mapRef.current?.setZoom(17);
+    if (viewMode === "3d") setFocus3D({ center: p, nonce: Date.now() });
   };
 
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
@@ -518,7 +541,20 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
       />
 
       <main className="earth-main">
-        <div ref={mapDiv} className="earth-map" />
+        <div ref={mapDiv} className="earth-map" style={{ display: viewMode === "2d" ? "block" : "none" }} />
+        {hasOpened3D && (
+          <div className="absolute inset-0" style={{ display: viewMode === "3d" ? "block" : "none" }}>
+            <Map3DView
+              nodes={nodes}
+              filter={filter}
+              selectedId={selectedId}
+              initialCenter={mapRef.current?.getCenter?.() ? { lat: mapRef.current.getCenter().lat(), lng: mapRef.current.getCenter().lng() } : { lat: -15.78, lng: -47.93 }}
+              initialZoom={mapRef.current?.getZoom?.() ?? zoom}
+              focusRequest={focus3D}
+              onSelect={setSelectedId}
+            />
+          </div>
+        )}
         {userId && (
           <a href="/conta" target="_blank" rel="noopener" title={`${userEmail ?? ""} — abrir conta em nova aba`} aria-label="Minha conta"
             className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-md hover:bg-muted">
@@ -527,7 +563,11 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         )}
 
         <div className="earth-toolbar">
-          <div className="earth-seg">
+          <div className="earth-seg mr-1">
+            <button className="earth-seg-btn" data-active={viewMode === "2d"} onClick={() => setViewMode("2d")} title="Mapa vetorial 2D">2D</button>
+            <button className="earth-seg-btn" data-active={viewMode === "3d"} onClick={() => { updateDraft([]); modeRef.current = "none"; setMode("none"); setHasOpened3D(true); setViewMode("3d"); }} title="Exploração orbital 3D" disabled={!ready}>3D Orbital</button>
+          </div>
+          {viewMode === "2d" && <div className="earth-seg">
             {tools.map((t) => (
               <button
                 key={t.id}
@@ -539,20 +579,22 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
                 {t.label}
               </button>
             ))}
-          </div>
-          <select value={mapType} onChange={(e) => setMapType(e.target.value)} className="earth-input w-36">
-            <option value="hybrid">Satélite + rótulos</option>
-            <option value="satellite">Satélite</option>
-            <option value="terrain">Relevo</option>
-            <option value="roadmap">Mapa</option>
-          </select>
+          </div>}
+          {viewMode === "2d" && (
+            <select value={mapType} onChange={(e) => setMapType(e.target.value)} className="earth-input w-36">
+              <option value="hybrid">Satélite + rótulos</option>
+              <option value="satellite">Satélite</option>
+              <option value="terrain">Relevo</option>
+              <option value="roadmap">Mapa</option>
+            </select>
+          )}
           <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); onGoto(); }}>
             <input value={goto} onChange={(e) => setGoto(e.target.value)} placeholder="-23.5505, -46.6333" className="earth-input w-48 font-mono" />
             <button className="earth-btn">Ir</button>
           </form>
         </div>
 
-        {mode === "ruler" && (
+        {viewMode === "2d" && mode === "ruler" && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
             <span className="font-mono text-sm">{fmtM(pathLengthM(draft))} m</span>
             <button className="earth-btn" onClick={() => updateDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Desfazer</button>
@@ -567,7 +609,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           </div>
         )}
 
-        {(mode === "polygon" || mode === "path") && (
+        {viewMode === "2d" && (mode === "polygon" || mode === "path") && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
             <span className="text-sm">{draft.length} pontos · duplo clique ou Enter conclui · Esc cancela</span>
             <button className="earth-btn" onClick={() => updateDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Desfazer</button>
@@ -575,7 +617,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           </div>
         )}
 
-        {sv.visible && sv.pos && (
+        {viewMode === "2d" && sv.visible && sv.pos && (
           <div className="earth-float top-16 left-1/2 -translate-x-1/2">
             <span className="font-mono text-xs">
               {sv.pos.lat.toFixed(6)}, {sv.pos.lng.toFixed(6)} · {Math.round(((sv.heading % 360) + 360) % 360)}°
@@ -585,7 +627,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           </div>
         )}
 
-        {sv.visible && sv.pos && (
+        {viewMode === "2d" && sv.visible && sv.pos && (
           <StreetViewMiniMap
             pos={sv.pos} heading={sv.heading} nodes={nodes} filter={filter}
             onMove={(p) => mapRef.current?.getStreetView().setPosition(p)}
