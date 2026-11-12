@@ -47,40 +47,20 @@ function reducer(state: GeoNode[], a: Action): GeoNode[] {
       if (a.parentId && descendantIds(state, a.id).has(a.parentId)) return state;
       return state.map((n) => (n.id === a.id ? { ...n, parentId: a.parentId } : n));
     }
-
     case "moveMany": {
-  const selected = new Set(a.ids);
-
-  // Evita mover individualmente os descendentes
-  // quando a pasta ancestral também está selecionada.
-  const roots = a.ids.filter((id) => {
-    let current = state.find((n) => n.id === id);
-
-    while (current?.parentId) {
-      if (selected.has(current.parentId)) return false;
-
-      current = state.find((n) => n.id === current!.parentId);
+      const selected = new Set(a.ids);
+      const roots = a.ids.filter((id) => {
+        let current = state.find((n) => n.id === id);
+        while (current?.parentId) {
+          if (selected.has(current.parentId)) return false;
+          current = state.find((n) => n.id === current!.parentId);
+        }
+        return true;
+      });
+      if (a.parentId && roots.some((id) => descendantIds(state, id).has(a.parentId!))) return state;
+      const moving = new Set(roots);
+      return state.map((n) => moving.has(n.id) ? { ...n, parentId: a.parentId } : n);
     }
-
-    return true;
-  });
-
-  // Impede movimentação circular.
-  if (
-    a.parentId &&
-    roots.some((id) => descendantIds(state, id).has(a.parentId!))
-  ) {
-    return state;
-  }
-
-  const moving = new Set(roots);
-
-  return state.map((n) =>
-    moving.has(n.id)
-      ? { ...n, parentId: a.parentId }
-      : n
-  );
-}  
   }
 }
 
@@ -134,13 +114,15 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   const [zoom, setZoom] = useState(4);
   const [filter, setFilter] = useState<Filter>({ text: "", kinds: { marker: true, polygon: true, path: true } });
   const [mapType, setMapType] = useState("hybrid");
-  const [cursor, setCursor] = useState<LatLng | null>(null);
   const [sv, setSv] = useState<{ visible: boolean; pos: LatLng | null; heading: number }>({ visible: false, pos: null, heading: 0 });
   const [goto, setGoto] = useState("");
   const [ftthOpen, setFtthOpen] = useState(false);
   const [savedMeasure, setSavedMeasure] = useState<number | null>(null);
 
   const mapDiv = useRef<HTMLDivElement>(null);
+  const cursorDisplayRef = useRef<HTMLDivElement>(null);
+  const cursorFrameRef = useRef<number | null>(null);
+  const pendingCursorRef = useRef<LatLng | null>(null);
   const mapRef = useRef<any>(null);
   const overlays = useRef(new Map<string, any>());
   const draftOverlay = useRef<any>(null);
@@ -227,13 +209,25 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         });
         mapRef.current = map;
         setZoom(map.getZoom?.() ?? 4);
-        map.addListener("zoom_changed", () => setZoom(map.getZoom() ?? 4));
         map.addListener("idle", () => {
+          const currentZoom = map.getZoom() ?? 4;
+          setZoom((previous) => previous === currentZoom ? previous : currentZoom);
           const c = map.getCenter();
-          if (c) localStorage.setItem(VIEW_KEY, JSON.stringify({ center: { lat: c.lat(), lng: c.lng() }, zoom: map.getZoom(), mapTypeId: map.getMapTypeId() }));
+          if (c) localStorage.setItem(VIEW_KEY, JSON.stringify({ center: { lat: c.lat(), lng: c.lng() }, zoom: currentZoom, mapTypeId: map.getMapTypeId() }));
         });
         info.current = new g.maps.InfoWindow();
-        map.addListener("mousemove", (e: any) => setCursor({ lat: e.latLng.lat(), lng: e.latLng.lng() }));
+        map.addListener("mousemove", (e: any) => {
+          if (!e.latLng) return;
+          pendingCursorRef.current = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+          if (cursorFrameRef.current !== null) return;
+          cursorFrameRef.current = window.requestAnimationFrame(() => {
+            cursorFrameRef.current = null;
+            const point = pendingCursorRef.current;
+            if (point && cursorDisplayRef.current) {
+              cursorDisplayRef.current.textContent = `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`;
+            }
+          });
+        });
         map.addListener("click", (e: any) => {
           const m = modeRef.current;
           const p = { lat: e.latLng.lat(), lng: e.latLng.lng() };
@@ -255,7 +249,13 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         setReady(true);
       })
       .catch((e) => toast.error(e.message));
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (cursorFrameRef.current !== null) {
+        window.cancelAnimationFrame(cursorFrameRef.current);
+        cursorFrameRef.current = null;
+      }
+    };
   }, [createFeature, updateDraft]);
 
   useEffect(() => { mapRef.current?.setMapTypeId(mapType); }, [mapType, ready]);
@@ -511,9 +511,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         onZoom={zoomTo}
         onToggle={(id, patch) => dispatch({ type: "update", id, patch })}
         onMove={(id, parentId) => dispatch({ type: "move", id, parentId })}
-        onMoveMany={(ids, parentId) =>
-        dispatch({ type: "moveMany", ids, parentId })
-        }
+        onMoveMany={(ids, parentId) => dispatch({ type: "moveMany", ids, parentId })}
         onAddFolder={addFolder}
         onImport={onImport}
         onExport={(f) => onExport(f)}
@@ -594,9 +592,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           />
         )}
 
-        <div className="earth-status">
-          {cursor ? `${cursor.lat.toFixed(6)}, ${cursor.lng.toFixed(6)}` : "—"}
-        </div>
+        <div ref={cursorDisplayRef} className="earth-status">—</div>
 
         {selected && (
           <Properties
