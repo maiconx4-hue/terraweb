@@ -183,7 +183,7 @@ body { font-family: var(--font-sans); }
   .earth-row[data-drop="true"] { @apply outline outline-1 outline-primary; }
   .earth-main { @apply relative flex-1; }
   .earth-map { @apply absolute inset-0; }
-  .earth-toolbar { @apply absolute left-3 top-3 z-50 flex flex-wrap items-center gap-2 rounded-lg border border-border p-1.5; background: var(--glass); box-shadow: var(--shadow-float); backdrop-filter: blur(8px); }
+  .earth-toolbar { @apply absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-border p-1.5; background: var(--glass); box-shadow: var(--shadow-float); backdrop-filter: blur(8px); }
   .earth-float { @apply absolute z-10 flex items-center gap-2 rounded-lg border border-border px-3 py-2; background: var(--glass); box-shadow: var(--shadow-float); }
   .earth-status { @apply absolute bottom-6 left-3 z-10 rounded-md px-2 py-1 font-mono text-xs; background: var(--glass); }
   .earth-panel { @apply absolute right-3 top-16 z-10 w-72 space-y-3 overflow-y-auto rounded-lg border border-border p-4; max-height: calc(100% - 6rem); background: var(--glass); box-shadow: var(--shadow-float); backdrop-filter: blur(8px); }
@@ -251,4 +251,27 @@ body { font-family: var(--font-sans); }
   @apply inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing;
   touch-action: none;
   user-select: none;
+}
+
+
+/* Feedback consistente de seleção e ferramentas no mapa 2D/3D. */
+.earth-row[data-selected="true"] {
+  background: color-mix(in srgb, #facc15 18%, var(--secondary));
+  color: #facc15;
+  outline: 1px solid color-mix(in srgb, #facc15 65%, transparent);
+  box-shadow: inset 3px 0 0 #facc15;
+}
+.earth-row[data-selected="true"] > svg {
+  color: #facc15 !important;
+  filter: drop-shadow(0 0 4px rgb(250 204 21 / 65%));
+}
+.earth-toolbar .earth-tool-icon[data-active="true"] {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 2px rgb(250 204 21 / 28%), 0 0 12px rgb(250 204 21 / 30%);
+  animation: earth-tool-feedback 420ms ease-out;
+}
+@keyframes earth-tool-feedback {
+  0% { transform: scale(.88); filter: brightness(1.5); }
+  55% { transform: scale(1.16); }
+  100% { transform: scale(1.08); filter: brightness(1); }
 }
