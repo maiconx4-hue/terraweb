@@ -391,10 +391,24 @@ export function Map3DView({
           });
           element.addEventListener?.("gmp-pointermove", (event: any) => {
             const drag = dragMarkerRef.current;
-            const position = event.position;
-            if (!drag || drag.id !== node.id || !position) return;
-            const next = { lat: Number(position.lat), lng: Number(position.lng) };
+            if (!drag || drag.id !== node.id) return;
+
+            // A API 3D pode entregar a posição em event.position ou detail.position,
+            // dependendo da versão do Maps/encapsulamento do evento.
+            const position =
+              event?.position ??
+              event?.detail?.position ??
+              event?.latLngAltitude ??
+              event?.detail?.latLngAltitude;
+
+            if (!position) return;
+
+            const next = {
+              lat: Number(position.lat),
+              lng: Number(position.lng),
+            };
             if (!Number.isFinite(next.lat) || !Number.isFinite(next.lng)) return;
+
             drag.position = next;
             drag.element.position = { ...next, altitude: 0 };
           });
@@ -426,8 +440,16 @@ export function Map3DView({
         element.drawsWhenOccluded = true;
         element.collisionBehavior = "OPTIONAL_AND_HIDES_LOWER_PRIORITY";
         element.zIndex = selected ? 10000 : 1;
-        element.style.filter = selected ? "drop-shadow(0 0 5px #facc15) drop-shadow(0 0 2px #facc15)" : "none";
-        element.style.cursor = "grab";
+
+        // Destaque persistente do CTO selecionado: halo amarelo/ciano,
+        // leve ampliação e prioridade de renderização acima dos demais.
+        element.sizePreserved = true;
+        element.style.filter = selected
+          ? "drop-shadow(0 0 7px #facc15) drop-shadow(0 0 3px #22d3ee)"
+          : "none";
+        element.style.transform = selected ? "scale(1.45)" : "scale(1)";
+        element.style.transformOrigin = "center center";
+        element.style.cursor = selected ? "grab" : "pointer";
         element.style.display = markerVisible ? "" : "none";
       } else if (node.kind === "polygon") {
         // Polygon3D não oferece fillOpacity/strokeOpacity.
