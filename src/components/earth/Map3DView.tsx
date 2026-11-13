@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 import { Compass, LocateFixed, LoaderCircle } from "lucide-react";
-import { isFeature, passesFilter, type Filter, type GeoNode, type LatLng } from "@/lib/geo/types";
+import { isFeature, passesFilter, type Filter, type FeatureStyle, type GeoNode, type LatLng } from "@/lib/geo/types";
 
 type Props = {
   nodes: GeoNode[];
@@ -68,6 +68,46 @@ const toRgba = (color: string, opacity: number) => {
   return hex || `rgba(255, 255, 255, ${alpha})`;
 };
 
+
+const MARKER_ICON_PATHS: Record<string, string> = {
+  pin: "M12 2C8 2 5 5 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-4-3-7-7-7zm0 4.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z",
+  circle: "M6 12a6 6 0 1 0 12 0a6 6 0 1 0 -12 0z",
+  square: "M6 6h12v12H6z",
+  star: "M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7z",
+  triangle: "M12 3L22 20H2z",
+};
+
+/**
+ * O Maps 3D desenha o marcador em WebGL: animation/transform/filter no elemento
+ * não têm efeito. O visual é definido pelo conteúdo (<template> com SVG).
+ * Replica o ícone do mapa 2D: selecionado = contorno ciano (ou moldura amarela
+ * no triângulo) e tamanho maior (2D usa 1.6x).
+ */
+const buildMarkerSvg = (style: FeatureStyle, selected: boolean) => {
+  const px = Math.max(16, Math.round(26 * style.scale * (selected ? 1.6 : 1)));
+  const color = style.color || "#c60000";
+  if (style.icon === "triangle") {
+    const frame = selected
+      ? `<rect x="2" y="2" width="60" height="60" fill="none" stroke="#facc15" stroke-width="5"/>`
+      : "";
+    const d = selected ? "M32 14 L52 50 L12 50 Z" : "M32 6 L60 56 L4 56 Z";
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 64 64">${frame}<path fill="${color}" stroke="#000" stroke-width="2" stroke-linejoin="round" d="${d}"/></svg>`;
+  }
+  const path = MARKER_ICON_PATHS[style.icon] ?? MARKER_ICON_PATHS.pin!;
+  const stroke = selected ? "#22d3ee" : "#ffffff";
+  const sw = selected ? 2.5 : 1.5;
+  const halo = selected ? `<circle cx="12" cy="12" r="11.5" fill="none" stroke="#facc15" stroke-width="1.2"/>` : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24">${halo}<path fill="${color}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" d="${path}"/></svg>`;
+};
+
+/** Substitui o conteúdo visual do marcador 3D (sem criar elementos duplicados). */
+const applyMarkerContent = (element: any, style: FeatureStyle, selected: boolean) => {
+  element.querySelectorAll?.("template").forEach((t: Element) => t.remove());
+  const template = document.createElement("template");
+  template.innerHTML = buildMarkerSvg(style, selected);
+  element.append(template);
+};
+
 const geometrySignature = (node: Extract<GeoNode, { kind: "marker" | "polygon" | "path" }>, selected: boolean) =>
   JSON.stringify({
     kind: node.kind,
@@ -127,19 +167,6 @@ export function Map3DView({
   onDraftPointRef.current = onDraftPoint;
 
   useEffect(() => {
-    const styleId = "terra-cto-selection-pulse";
-    if (!document.getElementById(styleId)) {
-      const style = document.createElement("style");
-      style.id = styleId;
-      style.textContent = `
-        @keyframes terra-cto-selection-pulse {
-          0%, 100% { filter: drop-shadow(0 0 2px #facc15) drop-shadow(0 0 1px #facc15); }
-          50% { filter: drop-shadow(0 0 11px #facc15) drop-shadow(0 0 6px #22d3ee); }
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
     let cancelled = false;
     let map: any;
 
@@ -480,14 +507,9 @@ export function Map3DView({
         element.collisionBehavior = "OPTIONAL_AND_HIDES_LOWER_PRIORITY";
         element.zIndex = selected ? 10000 : 1;
 
-        // Destaque persistente do CTO selecionado: halo amarelo/ciano,
-        // leve ampliação e prioridade de renderização acima dos demais.
+        // Destaque persistente: o ícone (SVG) é recriado com o estilo de seleção do 2D.
         element.sizePreserved = true;
-        element.style.animation = selected
-          ? "terra-cto-selection-pulse 1.15s ease-in-out infinite"
-          : "none";
-        element.style.transform = selected ? "scale(1.3)" : "scale(1)";
-        element.style.transformOrigin = "center center";
+        applyMarkerContent(element, style, selected);
         element.style.cursor = selected ? "grab" : "pointer";
         element.style.display = markerVisible ? "" : "none";
       } else if (node.kind === "polygon") {
@@ -495,15 +517,17 @@ export function Map3DView({
         // A transparência é aplicada no próprio valor CSS da cor.
         element.path = coords;
         element.strokeColor = toRgba(selected ? "#facc15" : style.color, selected ? 1 : style.strokeOpacity);
-        element.strokeWidth = selected ? Math.max(3, style.strokeWidth) : style.strokeWidth;
-        element.fillColor = toRgba(style.fillColor, style.fillOpacity);
+        element.strokeWidth = selected ? Math.max(6, style.strokeWidth + 4) : style.strokeWidth;
+        element.fillColor = selected
+          ? toRgba("#facc15", Math.max(0.35, style.fillOpacity))
+          : toRgba(style.fillColor, style.fillOpacity);
         element.drawsOccludedSegments = true;
         element.geodesic = true;
         element.zIndex = selected ? 10000 : 1;
       } else {
         element.path = coords;
         element.strokeColor = toRgba(selected ? "#facc15" : style.color, selected ? 1 : style.strokeOpacity);
-        element.strokeWidth = selected ? Math.max(4, style.strokeWidth) : style.strokeWidth;
+        element.strokeWidth = selected ? Math.max(7, style.strokeWidth + 4) : style.strokeWidth;
         element.drawsOccludedSegments = true;
         element.geodesic = true;
         element.zIndex = selected ? 10000 : 1;
