@@ -608,6 +608,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               onUpdate={(id, patch) => dispatch({ type: "update", id, patch })}
               onCenterChange={setCenter3D}
               mode={mode}
+              draft={draft}
               onCreateMarker={(point) => createFeature("marker", [point])}
               onExitMarkerMode={() => { modeRef.current = "none"; setMode("none"); }}
               onDraftPoint={(point) => updateDraft((d) => {

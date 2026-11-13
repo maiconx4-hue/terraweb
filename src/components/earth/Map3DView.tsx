@@ -14,6 +14,7 @@ type Props = {
   onUpdate: (id: string, patch: Partial<GeoNode>) => void;
   onCenterChange?: (center: LatLng) => void;
   mode?: "none" | "marker" | "polygon" | "path" | "ruler";
+  draft?: LatLng[];
   onCreateMarker?: (point: LatLng) => void;
   onExitMarkerMode?: () => void;
   onDraftPoint?: (point: LatLng) => void;
@@ -109,6 +110,12 @@ const applyMarkerContent = (element: any, style: FeatureStyle, selected: boolean
   element.append(template);
 };
 
+/** Vértice do rascunho: círculo branco com contorno laranja, como no mapa 2D. */
+const draftVertexSvg = (isNew: boolean) => {
+  const px = isNew ? 20 : 16;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" fill="#ffffff" stroke="${isNew ? "#f97316" : "#f59e0b"}" stroke-width="2.5"/></svg>`;
+};
+
 const geometrySignature = (node: Extract<GeoNode, { kind: "marker" | "polygon" | "path" }>, selected: boolean) =>
   JSON.stringify({
     kind: node.kind,
@@ -135,6 +142,7 @@ export function Map3DView({
   onUpdate,
   onCenterChange,
   mode = "none",
+  draft,
   onCreateMarker,
   onExitMarkerMode,
   onDraftPoint,
@@ -321,6 +329,65 @@ export function Map3DView({
       window.removeEventListener("pointercancel", finish, true);
     };
   }, []);
+
+  // Rascunho durante a criação (polígono, caminho, régua): linha/área amarela e
+  // vértices brancos, como no mapa 2D. Usa elementos não interativos para que os
+  // cliques continuem chegando ao mapa.
+  useEffect(() => {
+    const map = mapRef.current;
+    const lib = libraryRef.current;
+    if (!map || !lib || status !== "ready") return;
+    if (!draft || draft.length === 0) return;
+    if (mode !== "polygon" && mode !== "path" && mode !== "ruler") return;
+
+    const LineClass = lib.Polyline3DElement || lib.Polyline3DInteractiveElement;
+    const PolyClass = lib.Polygon3DElement || lib.Polygon3DInteractiveElement;
+    const PointClass = lib.Marker3DElement || lib.Marker3DInteractiveElement;
+    const path = draft.map((point) => ({ lat: point.lat, lng: point.lng, altitude: 0 }));
+    const color = mode === "ruler" ? "#f43f5e" : "#facc15";
+    const created: any[] = [];
+
+    if (mode === "polygon" && draft.length >= 3 && PolyClass) {
+      const area = new PolyClass();
+      area.path = path;
+      area.strokeColor = color;
+      area.strokeWidth = 3;
+      area.fillColor = toRgba("#facc15", 0.2);
+      area.drawsOccludedSegments = true;
+      area.geodesic = true;
+      area.zIndex = 20000;
+      map.append(area);
+      created.push(area);
+    } else if (draft.length >= 2 && LineClass) {
+      const line = new LineClass();
+      line.path = path;
+      line.strokeColor = color;
+      line.strokeWidth = 3;
+      line.drawsOccludedSegments = true;
+      line.geodesic = true;
+      line.zIndex = 20000;
+      map.append(line);
+      created.push(line);
+    }
+
+    if (PointClass) {
+      draft.forEach((point, index) => {
+        const vertex = new PointClass();
+        vertex.position = { lat: point.lat, lng: point.lng, altitude: 0 };
+        vertex.sizePreserved = true;
+        vertex.drawsWhenOccluded = true;
+        vertex.collisionBehavior = "REQUIRED";
+        vertex.zIndex = 20001;
+        const template = document.createElement("template");
+        template.innerHTML = draftVertexSvg(index === draft.length - 1);
+        vertex.append(template);
+        map.append(vertex);
+        created.push(vertex);
+      });
+    }
+
+    return () => created.forEach((element) => element.remove?.());
+  }, [draft, mode, status]);
 
   // Sincroniza somente os objetos que realmente mudaram.
   // Selecionar um item não desmonta centenas de outros marcadores.
