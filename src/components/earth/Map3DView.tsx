@@ -16,6 +16,9 @@ type Props = {
   mode?: "none" | "marker" | "polygon" | "path" | "ruler";
   onCreateMarker?: (point: LatLng) => void;
   onDraftPoint?: (point: LatLng) => void;
+  draftPoints?: LatLng[];
+  draftCursor?: LatLng | null;
+  onDraftMove?: (point: LatLng) => void;
 };
 
 type OverlayRecord = {
@@ -96,6 +99,8 @@ export function Map3DView({
   mode = "none",
   onCreateMarker,
   onDraftPoint,
+  draftPoints = [],
+  draftCursor = null,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -109,6 +114,8 @@ export function Map3DView({
   const modeRef = useRef(mode);
   const onCreateMarkerRef = useRef(onCreateMarker);
   const onDraftPointRef = useRef(onDraftPoint);
+  const onDraftMoveRef = useRef<((point: LatLng) => void) | undefined>(undefined);
+  const draftCursorRef = useRef(draftCursor);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
@@ -118,6 +125,8 @@ export function Map3DView({
   modeRef.current = mode;
   onCreateMarkerRef.current = onCreateMarker;
   onDraftPointRef.current = onDraftPoint;
+  draftCursorRef.current = draftCursor;
+  onDraftMoveRef.current = onDraftMove;
 
   useEffect(() => {
     let cancelled = false;
@@ -190,6 +199,20 @@ export function Map3DView({
           else if (active === "polygon" || active === "path" || active === "ruler") onDraftPointRef.current?.(point);
         };
         map.addEventListener("gmp-click", handleMapClick);
+        const handleMapPointerMove = (event: any) => {
+          const point = eventLatLng(event);
+          const drag = dragMarkerRef.current;
+          if (drag && point) {
+            drag.position = point;
+            drag.element.position = { ...point, altitude: 0 };
+            return;
+          }
+          if ((modeRef.current === "polygon" || modeRef.current === "path") && point) {
+            onDraftMoveRef.current?.(point);
+          }
+        };
+        map.addEventListener("gmp-pointermove", handleMapPointerMove);
+        (map as any).__terraHandleMapPointerMove = handleMapPointerMove;
         (map as any).__terraHandleMapClick = handleMapClick;
         hostRef.current.replaceChildren(map);
         mapRef.current = map;
@@ -215,6 +238,7 @@ export function Map3DView({
       map?.removeEventListener?.("gmp-error", handleMapError);
       map?.removeEventListener?.("gmp-map-id-error", handleMapIdError);
       if ((map as any)?.__terraHandleMapClick) map.removeEventListener?.("gmp-click", (map as any).__terraHandleMapClick);
+      if ((map as any)?.__terraHandleMapPointerMove) map.removeEventListener?.("gmp-pointermove", (map as any).__terraHandleMapPointerMove);
       if (centerListenerRef.current) map?.removeEventListener?.("gmp-centerchange", centerListenerRef.current);
       centerListenerRef.current = null;
       mapRef.current = null;
@@ -364,37 +388,21 @@ export function Map3DView({
             event.stopPropagation();
             if (!dragMarkerRef.current) onSelectRef.current(node.id);
           });
-          // O Maps 3D só emite gmp-pointermove no Marker3DInteractiveElement.
-          // Mantemos um hit-target 3D transparente sobre o ícone HTML para permitir arraste geográfico.
-          if (markerHitClass) {
-            interactionElement = new markerHitClass();
-            interactionElement.addEventListener?.("gmp-click", (event: Event) => {
-              event.stopPropagation();
-              if (!dragMarkerRef.current) onSelectRef.current(node.id);
-            });
-            interactionElement.addEventListener?.("pointerdown", (event: PointerEvent) => {
-              if (event.button !== 0 || modeRef.current !== "none") return;
-              event.preventDefault();
-              event.stopPropagation();
-              interactionElement.setPointerCapture?.(event.pointerId);
-              onSelectRef.current(node.id);
-              const current = interactionElement.position;
-              if (!current) return;
-              dragMarkerRef.current = {
-                id: node.id, element: interactionElement, pointerId: event.pointerId,
-                position: { lat: Number(current.lat), lng: Number(current.lng) },
-              };
-            });
-            interactionElement.addEventListener?.("gmp-pointermove", (event: any) => {
-              const drag = dragMarkerRef.current;
-              const next = eventLatLng(event);
-              if (!drag || drag.id !== node.id || !next) return;
-              drag.position = next;
-              drag.element.position = { ...next, altitude: 0 };
-              const visualMarker = overlaysRef.current.get(node.id)?.element;
-              if (visualMarker) visualMarker.position = { ...next, altitude: 0 };
-            });
-          }
+          // O próprio MarkerInteractiveElement contém o ícone HTML e recebe
+          // os eventos geográficos. Um segundo Marker3D criava o pin vermelho duplicado.
+          element.addEventListener?.("pointerdown", (event: PointerEvent) => {
+            if (event.button !== 0 || modeRef.current !== "none") return;
+            event.preventDefault();
+            event.stopPropagation();
+            element.setPointerCapture?.(event.pointerId);
+            onSelectRef.current(node.id);
+            const current = element.position;
+            if (!current) return;
+            dragMarkerRef.current = {
+              id: node.id, element, pointerId: event.pointerId,
+              position: { lat: Number(current.lat), lng: Number(current.lng) },
+            };
+          });
         } else if (node.kind === "polygon" && polygonClass) {
           element = new polygonClass();
           element.addEventListener?.("gmp-click", (event: Event) => {
@@ -474,13 +482,6 @@ export function Map3DView({
 
       if (node.kind === "marker") {
         element.position = coords[0];
-        if (record.interactionElement) {
-          record.interactionElement.position = coords[0];
-          record.interactionElement.style.opacity = "0";
-          record.interactionElement.style.pointerEvents = mode === "none" ? "auto" : "none";
-          record.interactionElement.collisionBehavior = "REQUIRED";
-          record.interactionElement.zIndex = selected ? 10001 : 2;
-        }
         element.label = node.name || "Marcador";
         element.title = node.name || "Marcador";
         element.collisionBehavior = "REQUIRED";
@@ -524,6 +525,50 @@ export function Map3DView({
       }
     }
   }, [nodes, filter, selectedId, mode]);
+
+  // Prévia do desenho no orbital: a linha acompanha o cursor até o próximo clique.
+  useEffect(() => {
+    const map = mapRef.current;
+    const lib = libraryRef.current;
+    if (!map || !lib) return;
+    const points = [...draftPoints];
+    if (draftCursor && (mode === "polygon" || mode === "path")) {
+      const last = points[points.length - 1];
+      if (!last || Math.abs(last.lat - draftCursor.lat) > 1e-9 || Math.abs(last.lng - draftCursor.lng) > 1e-9) {
+        points.push(draftCursor);
+      }
+    }
+    const PreviewLine = lib.Polyline3DElement;
+    const PreviewPolygon = lib.Polygon3DElement;
+    const old = (map as any).__terraDraftPreview;
+    old?.remove?.();
+    (map as any).__terraDraftPreview = null;
+    if (!points.length) return;
+    let preview: any;
+    const coords = points.map((point) => ({ lat: point.lat, lng: point.lng, altitude: 1 }));
+    if (mode === "polygon" && draftPoints.length >= 2 && draftCursor && PreviewPolygon) {
+      preview = new PreviewPolygon();
+      preview.path = coords;
+      preview.fillColor = "rgba(250,204,21,0.18)";
+      preview.strokeColor = "#facc15";
+      preview.strokeWidth = 3;
+    } else if (PreviewLine) {
+      preview = new PreviewLine();
+      preview.path = coords;
+      preview.strokeColor = "#facc15";
+      preview.strokeWidth = 4;
+    }
+    if (preview) {
+      preview.drawsOccludedSegments = true;
+      preview.zIndex = 30000;
+      map.append(preview);
+      (map as any).__terraDraftPreview = preview;
+    }
+    return () => {
+      preview?.remove?.();
+      if ((map as any).__terraDraftPreview === preview) (map as any).__terraDraftPreview = null;
+    };
+  }, [draftPoints, draftCursor, mode]);
 
   useEffect(() => {
     if (!focusRequest || !mapRef.current) return;
