@@ -108,7 +108,6 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("none");
   const [draft, setDraft] = useState<LatLng[]>([]);
-  const [draftCursor3D, setDraftCursor3D] = useState<LatLng | null>(null);
   const draftRef = useRef<LatLng[]>([]);
   const updateDraft = useCallback((value: LatLng[] | ((previous: LatLng[]) => LatLng[])) => {
     const next = typeof value === "function" ? value(draftRef.current) : value;
@@ -343,10 +342,6 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
     else if (points.length) toast.message(m === "polygon" ? "Um polígono precisa de 3 pontos" : "Um caminho precisa de 2 pontos");
     setMode("none");
   }, [createFeature, updateDraft]);
-
-  useEffect(() => {
-    setDraftCursor3D(null);
-  }, [mode, viewMode]);
 
   useEffect(() => {
     if (!ready) return;
@@ -610,19 +605,11 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               onUpdate={(id, patch) => dispatch({ type: "update", id, patch })}
               onCenterChange={setCenter3D}
               mode={mode}
-              onCreateMarker={(point) => {
-                createFeature("marker", [point]);
-                // Encerra o modo de criação: o novo marcador já fica selecionado
-                // e pode ser movido sem que o próximo clique crie outro marcador.
-                setMode("none");
-              }}
+              onCreateMarker={(point) => createFeature("marker", [point])}
               onDraftPoint={(point) => updateDraft((d) => {
                 const last = d.at(-1);
                 return last && last.lat === point.lat && last.lng === point.lng ? d : [...d, point];
               })}
-              draftPoints={draft}
-              draftCursor={draftCursor3D}
-              onDraftMove={setDraftCursor3D}
             />
           </div>
         )}

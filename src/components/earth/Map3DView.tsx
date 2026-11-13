@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 import { Compass, LocateFixed, LoaderCircle } from "lucide-react";
-import { isFeature, passesFilter, TRIANGLE_ICON_URL, type Filter, type GeoNode, type LatLng } from "@/lib/geo/types";
+import { isFeature, passesFilter, type Filter, type GeoNode, type LatLng } from "@/lib/geo/types";
 
 type Props = {
   nodes: GeoNode[];
@@ -16,15 +16,11 @@ type Props = {
   mode?: "none" | "marker" | "polygon" | "path" | "ruler";
   onCreateMarker?: (point: LatLng) => void;
   onDraftPoint?: (point: LatLng) => void;
-  draftPoints?: LatLng[];
-  draftCursor?: LatLng | null;
-  onDraftMove?: (point: LatLng) => void;
 };
 
 type OverlayRecord = {
   kind: "marker" | "polygon" | "path";
   element: any;
-  interactionElement?: any;
   signature: string;
 };
 
@@ -62,15 +58,6 @@ const toRgba = (color: string, opacity: number) => {
   return hex || `rgba(255, 255, 255, ${alpha})`;
 };
 
-const eventLatLng = (event: any): LatLng | null => {
-  const raw = event?.position ?? event?.detail?.position ?? event?.latLngAltitude ??
-    event?.detail?.latLngAltitude ?? event?.detail?.location;
-  if (!raw) return null;
-  const lat = Number(raw.lat);
-  const lng = Number(raw.lng);
-  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
-};
-
 const geometrySignature = (node: Extract<GeoNode, { kind: "marker" | "polygon" | "path" }>, selected: boolean) =>
   JSON.stringify({
     kind: node.kind,
@@ -99,9 +86,6 @@ export function Map3DView({
   mode = "none",
   onCreateMarker,
   onDraftPoint,
-  onDraftMove,
-  draftPoints = [],
-  draftCursor = null,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -115,8 +99,6 @@ export function Map3DView({
   const modeRef = useRef(mode);
   const onCreateMarkerRef = useRef(onCreateMarker);
   const onDraftPointRef = useRef(onDraftPoint);
-  const onDraftMoveRef = useRef<((point: LatLng) => void) | undefined>(undefined);
-  const draftCursorRef = useRef(draftCursor);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
@@ -126,8 +108,6 @@ export function Map3DView({
   modeRef.current = mode;
   onCreateMarkerRef.current = onCreateMarker;
   onDraftPointRef.current = onDraftPoint;
-  draftCursorRef.current = draftCursor;
-  onDraftMoveRef.current = onDraftMove;
 
   useEffect(() => {
     let cancelled = false;
@@ -200,20 +180,6 @@ export function Map3DView({
           else if (active === "polygon" || active === "path" || active === "ruler") onDraftPointRef.current?.(point);
         };
         map.addEventListener("gmp-click", handleMapClick);
-        const handleMapPointerMove = (event: any) => {
-          const point = eventLatLng(event);
-          const drag = dragMarkerRef.current;
-          if (drag && point) {
-            drag.position = point;
-            drag.element.position = { ...point, altitude: 0 };
-            return;
-          }
-          if ((modeRef.current === "polygon" || modeRef.current === "path") && point) {
-            onDraftMoveRef.current?.(point);
-          }
-        };
-        map.addEventListener("gmp-pointermove", handleMapPointerMove);
-        (map as any).__terraHandleMapPointerMove = handleMapPointerMove;
         (map as any).__terraHandleMapClick = handleMapClick;
         hostRef.current.replaceChildren(map);
         mapRef.current = map;
@@ -231,15 +197,11 @@ export function Map3DView({
 
     return () => {
       cancelled = true;
-      overlaysRef.current.forEach(({ element, interactionElement }) => {
-        element.remove?.();
-        interactionElement?.remove?.();
-      });
+      overlaysRef.current.forEach(({ element }) => element.remove?.());
       overlaysRef.current.clear();
       map?.removeEventListener?.("gmp-error", handleMapError);
       map?.removeEventListener?.("gmp-map-id-error", handleMapIdError);
       if ((map as any)?.__terraHandleMapClick) map.removeEventListener?.("gmp-click", (map as any).__terraHandleMapClick);
-      if ((map as any)?.__terraHandleMapPointerMove) map.removeEventListener?.("gmp-pointermove", (map as any).__terraHandleMapPointerMove);
       if (centerListenerRef.current) map?.removeEventListener?.("gmp-centerchange", centerListenerRef.current);
       centerListenerRef.current = null;
       mapRef.current = null;
@@ -301,13 +263,14 @@ export function Map3DView({
         if (event.button !== 0) return;
         event.preventDefault();
         event.stopPropagation();
-        handle.setPointerCapture?.(event.pointerId);
         active = { index, pointerId: event.pointerId, position: { ...nextCoords[index]! } };
       });
       handle.addEventListener("gmp-pointermove", (event: any) => {
         if (!active || active.index !== index) return;
-        const position = eventLatLng(event);
-        if (!position) return;
+        const raw = event?.position ?? event?.detail?.position;
+        if (!raw) return;
+        const position = { lat: Number(raw.lat), lng: Number(raw.lng) };
+        if (!Number.isFinite(position.lat) || !Number.isFinite(position.lng)) return;
         active.position = position;
         handle.position = { ...position, altitude: 2 };
         const live = nextCoords.map((coord, i) => i === index ? position : coord);
@@ -334,10 +297,7 @@ export function Map3DView({
     const lib = libraryRef.current;
     if (!map || !lib) return;
 
-    // MarkerInteractiveElement aceita conteúdo HTML (imagem KML), enquanto
-    // Marker3DElement renderiza somente o pin padrão do Google.
-    const markerClass = lib.MarkerInteractiveElement || lib.MarkerElement;
-    const markerHitClass = lib.Marker3DInteractiveElement;
+    const markerClass = lib.Marker3DInteractiveElement || lib.Marker3DElement;
     const polygonClass = lib.Polygon3DInteractiveElement || lib.Polygon3DElement;
     const lineClass = lib.Polyline3DInteractiveElement || lib.Polyline3DElement;
     const liveIds = new Set<string>();
@@ -359,7 +319,7 @@ export function Map3DView({
 
       liveIds.add(node.id);
       const selected = node.id === selectedId;
-      const signature = `${geometrySignature(node, selected)}:${mode}`;
+      const signature = geometrySignature(node, selected);
       const existing = overlaysRef.current.get(node.id);
 
       if (existing && existing.kind === node.kind && existing.signature === signature) {
@@ -376,26 +336,19 @@ export function Map3DView({
 
       if (!record || record.kind !== node.kind) {
         record?.element.remove?.();
-        record?.interactionElement?.remove?.();
 
         let element: any;
-        let interactionElement: any = null;
         if (node.kind === "marker" && markerClass) {
-          // Marcador visual HTML para usar o ícone KML exato.
           element = new markerClass();
-          element.anchorLeft = "-50%";
-          element.anchorTop = "-50%";
-          element.addEventListener?.("gmp-click", (event: Event) => {
-            event.stopPropagation();
+          element.addEventListener?.("gmp-click", () => {
+            if (modeRef.current !== "none") return;
             if (!dragMarkerRef.current) onSelectRef.current(node.id);
           });
-          // O próprio MarkerInteractiveElement contém o ícone HTML e recebe
-          // os eventos geográficos. Um segundo Marker3D criava o pin vermelho duplicado.
+          // O evento gmp-pointermove fornece a coordenada geográfica real sob o cursor.
           element.addEventListener?.("pointerdown", (event: PointerEvent) => {
-            if (event.button !== 0 || modeRef.current !== "none") return;
+            if (event.button !== 0) return;
             event.preventDefault();
             event.stopPropagation();
-            element.setPointerCapture?.(event.pointerId);
             onSelectRef.current(node.id);
             const current = element.position;
             if (!current) return;
@@ -404,18 +357,21 @@ export function Map3DView({
               position: { lat: Number(current.lat), lng: Number(current.lng) },
             };
           });
+          element.addEventListener?.("gmp-pointermove", (event: any) => {
+            const drag = dragMarkerRef.current;
+            const position = event.position;
+            if (!drag || drag.id !== node.id || !position) return;
+            const next = { lat: Number(position.lat), lng: Number(position.lng) };
+            if (!Number.isFinite(next.lat) || !Number.isFinite(next.lng)) return;
+            drag.position = next;
+            drag.element.position = { ...next, altitude: 0 };
+          });
         } else if (node.kind === "polygon" && polygonClass) {
           element = new polygonClass();
-          element.addEventListener?.("gmp-click", (event: Event) => {
-            event.stopPropagation();
-            if (modeRef.current === "none") onSelectRef.current(node.id);
-          });
+          element.addEventListener?.("gmp-click", () => { if (modeRef.current === "none") onSelectRef.current(node.id); });
         } else if (node.kind === "path" && lineClass) {
           element = new lineClass();
-          element.addEventListener?.("gmp-click", (event: Event) => {
-            event.stopPropagation();
-            if (modeRef.current === "none") onSelectRef.current(node.id);
-          });
+          element.addEventListener?.("gmp-click", () => { if (modeRef.current === "none") onSelectRef.current(node.id); });
         }
 
         if (!element) {
@@ -423,58 +379,8 @@ export function Map3DView({
           continue;
         }
 
-        if (node.kind === "marker") {
-          const visual = document.createElement("span");
-          visual.className = "terra-3d-marker-visual";
-          visual.style.cssText = [
-            "display:flex", "align-items:center", "justify-content:center",
-            "width:30px", "height:30px", "border-radius:50%",
-            "background:transparent", "box-sizing:border-box",
-            "transition:transform 120ms ease, background 120ms ease, box-shadow 120ms ease",
-          ].join(";");
-          const image = document.createElement("img");
-          image.src = TRIANGLE_ICON_URL;
-          image.alt = node.name || "CTO";
-          image.draggable = false;
-          image.style.cssText = "display:block;width:24px;height:24px;object-fit:contain;pointer-events:none;";
-          visual.append(image);
-          element.append(visual);
-          element.__terraVisual = visual;
-          if (interactionElement) {
-            interactionElement.addEventListener?.("gmp-pointerover", () => {
-              if (node.id !== selectedId) {
-                visual.style.background = "rgba(250, 204, 21, .12)";
-                visual.style.boxShadow = "0 0 0 2px rgba(250,204,21,.75)";
-                visual.style.transform = "scale(1.12)";
-              }
-            });
-            interactionElement.addEventListener?.("gmp-pointerout", () => {
-              if (node.id !== selectedId) {
-                visual.style.background = "transparent";
-                visual.style.boxShadow = "none";
-                visual.style.transform = "scale(1)";
-              }
-            });
-          }
-          element.addEventListener?.("gmp-pointerover", () => {
-            if (node.id !== selectedId) {
-              visual.style.background = "rgba(250, 204, 21, .12)";
-              visual.style.boxShadow = "0 0 0 2px rgba(250,204,21,.75)";
-              visual.style.transform = "scale(1.12)";
-            }
-          });
-          element.addEventListener?.("gmp-pointerout", () => {
-            if (node.id !== selectedId) {
-              visual.style.background = "transparent";
-              visual.style.boxShadow = "none";
-              visual.style.transform = "scale(1)";
-            }
-          });
-        }
-
         map.append(element);
-        if (interactionElement) map.append(interactionElement);
-        record = { kind: node.kind, element, interactionElement, signature: "" };
+        record = { kind: node.kind, element, signature: "" };
         overlaysRef.current.set(node.id, record);
       }
 
@@ -485,16 +391,11 @@ export function Map3DView({
         element.position = coords[0];
         element.label = node.name || "Marcador";
         element.title = node.name || "Marcador";
-        element.collisionBehavior = "REQUIRED";
-        element.collisionPriority = selected ? 100000 : 1000;
+        element.drawsWhenOccluded = true;
+        element.collisionBehavior = "OPTIONAL_AND_HIDES_LOWER_PRIORITY";
         element.zIndex = selected ? 10000 : 1;
-        element.style.cursor = mode === "none" ? "grab" : "crosshair";
-        const visual = element.__terraVisual as HTMLElement | undefined;
-        if (visual) {
-          visual.style.background = selected ? "rgba(250, 204, 21, .22)" : "transparent";
-          visual.style.boxShadow = selected ? "0 0 0 3px #facc15, 0 0 12px 5px rgba(250,204,21,.85)" : "none";
-          visual.style.transform = selected ? "scale(1.22)" : "scale(1)";
-        }
+        element.style.filter = selected ? "drop-shadow(0 0 5px #facc15) drop-shadow(0 0 2px #facc15)" : "none";
+        element.style.cursor = "grab";
       } else if (node.kind === "polygon") {
         // Polygon3D não oferece fillOpacity/strokeOpacity.
         // A transparência é aplicada no próprio valor CSS da cor.
@@ -521,55 +422,10 @@ export function Map3DView({
     for (const [id, record] of overlaysRef.current) {
       if (!liveIds.has(id)) {
         record.element.remove?.();
-        record.interactionElement?.remove?.();
         overlaysRef.current.delete(id);
       }
     }
-  }, [nodes, filter, selectedId, mode]);
-
-  // Prévia do desenho no orbital: a linha acompanha o cursor até o próximo clique.
-  useEffect(() => {
-    const map = mapRef.current;
-    const lib = libraryRef.current;
-    if (!map || !lib) return;
-    const points = [...draftPoints];
-    if (draftCursor && (mode === "polygon" || mode === "path")) {
-      const last = points[points.length - 1];
-      if (!last || Math.abs(last.lat - draftCursor.lat) > 1e-9 || Math.abs(last.lng - draftCursor.lng) > 1e-9) {
-        points.push(draftCursor);
-      }
-    }
-    const PreviewLine = lib.Polyline3DElement;
-    const PreviewPolygon = lib.Polygon3DElement;
-    const old = (map as any).__terraDraftPreview;
-    old?.remove?.();
-    (map as any).__terraDraftPreview = null;
-    if (!points.length) return;
-    let preview: any;
-    const coords = points.map((point) => ({ lat: point.lat, lng: point.lng, altitude: 1 }));
-    if (mode === "polygon" && draftPoints.length >= 2 && draftCursor && PreviewPolygon) {
-      preview = new PreviewPolygon();
-      preview.path = coords;
-      preview.fillColor = "rgba(250,204,21,0.18)";
-      preview.strokeColor = "#facc15";
-      preview.strokeWidth = 3;
-    } else if (PreviewLine) {
-      preview = new PreviewLine();
-      preview.path = coords;
-      preview.strokeColor = "#facc15";
-      preview.strokeWidth = 4;
-    }
-    if (preview) {
-      preview.drawsOccludedSegments = true;
-      preview.zIndex = 30000;
-      map.append(preview);
-      (map as any).__terraDraftPreview = preview;
-    }
-    return () => {
-      preview?.remove?.();
-      if ((map as any).__terraDraftPreview === preview) (map as any).__terraDraftPreview = null;
-    };
-  }, [draftPoints, draftCursor, mode]);
+  }, [nodes, filter, selectedId]);
 
   useEffect(() => {
     if (!focusRequest || !mapRef.current) return;
