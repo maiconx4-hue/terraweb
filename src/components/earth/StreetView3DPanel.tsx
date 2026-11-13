@@ -117,7 +117,7 @@ export function StreetView3DPanel({
       className="absolute z-30 overflow-hidden rounded-xl border border-border bg-black shadow-2xl"
       style={{
         left: panelPosition?.left, top: panelPosition?.top, right: panelPosition ? undefined : 16, bottom: panelPosition ? undefined : 16,
-        width: 'min(720px, calc(100% - 32px))', height: 'min(540px, calc(100% - 88px))',
+        width: 'min(1120px, 82vw, calc(100% - 32px))', height: 'min(760px, 82vh, calc(100% - 88px))',
       }}
       aria-label="Street View no modo 3D"
     >

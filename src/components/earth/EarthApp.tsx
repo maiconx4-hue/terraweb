@@ -602,6 +602,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               initialZoom={mapRef.current?.getZoom?.() ?? zoom}
               focusRequest={focus3D}
               onSelect={setSelectedId}
+              onUpdate={(id, patch) => dispatch({ type: "update", id, patch })}
               onCenterChange={setCenter3D}
             />
           </div>
@@ -621,32 +622,56 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
             <Grip className="size-4" aria-hidden="true" />
           </button>
           <div className="earth-seg mr-1">
-            <button className="earth-seg-btn" data-active={viewMode === "2d"} onClick={() => setViewMode("2d")} title="Mapa vetorial 2D">2D</button>
-            <button className="earth-seg-btn" data-active={viewMode === "3d"} onClick={() => { updateDraft([]); modeRef.current = "none"; setMode("none"); setHasOpened3D(true); setViewMode("3d"); }} title="Exploração orbital 3D" disabled={!ready}>3D Orbital</button>
-          </div>
-          {viewMode === "3d" && (
-            <button
-              type="button"
-              className="earth-seg-btn earth-tool-icon"
-              title={sv3dOpen ? "Fechar Street View" : "Abrir Street View no modo 3D"}
-              aria-label={sv3dOpen ? "Fechar Street View" : "Abrir Street View no modo 3D"}
-              data-active={sv3dOpen}
-              onClick={() => {
-                if (sv3dOpen) { setSv3dOpen(false); return; }
-                const center = mapRef.current?.getCenter?.();
-                const start = sv.visible && sv.pos
-                  ? sv.pos
-                  : sv3dPosition ?? (viewMode === "3d"
-                    ? center3D
-                    : center ? { lat: center.lat(), lng: center.lng() } : { lat: -15.78, lng: -47.93 });
-                setSv3dPosition(start);
-                if (sv.visible) setSv3dHeading(sv.heading ?? 0);
+            <button className="earth-seg-btn" data-active={viewMode === "2d"} onClick={() => {
+              if (viewMode === "3d" && sv3dOpen && sv3dPosition) {
+                const pano = mapRef.current?.getStreetView();
+                pano?.setPosition(sv3dPosition);
+                pano?.setPov({ heading: sv3dHeading, pitch: 0 });
+                pano?.setVisible(true);
+                setSv3dOpen(false);
+              }
+              setViewMode("2d");
+            }} title="Mapa vetorial 2D">2D</button>
+            <button className="earth-seg-btn" data-active={viewMode === "3d"} onClick={() => {
+              updateDraft([]); modeRef.current = "none"; setMode("none"); setHasOpened3D(true);
+              const pano = mapRef.current?.getStreetView();
+              if (pano?.getVisible()) {
+                const pos = pano.getPosition();
+                if (pos) setSv3dPosition({ lat: pos.lat(), lng: pos.lng() });
+                setSv3dHeading(pano.getPov()?.heading ?? 0);
+                pano.setVisible(false);
                 setSv3dOpen(true);
-              }}
-            >
-              <MapPinned className="size-4" aria-hidden="true" />
-            </button>
-          )}
+              }
+              setViewMode("3d");
+            }} title="Exploração orbital 3D" disabled={!ready}>3D Orbital</button>
+          </div>
+          <button
+            type="button"
+            className="earth-seg-btn earth-tool-icon"
+            title={viewMode === "2d" ? (sv.visible ? "Fechar Street View" : "Abrir Street View no modo 2D") : (sv3dOpen ? "Fechar Street View" : "Abrir Street View no modo 3D")}
+            aria-label="Street View"
+            data-active={viewMode === "2d" ? sv.visible : sv3dOpen}
+            onClick={() => {
+              if (viewMode === "2d") {
+                const pano = mapRef.current?.getStreetView();
+                if (pano?.getVisible()) { pano.setVisible(false); return; }
+                const center = mapRef.current?.getCenter?.();
+                const start = sv3dPosition ?? (center ? { lat: center.lat(), lng: center.lng() } : { lat: -15.78, lng: -47.93 });
+                pano?.setPosition(sv.pos ?? start);
+                pano?.setPov({ heading: sv.heading ?? sv3dHeading, pitch: 0 });
+                pano?.setVisible(true);
+                return;
+              }
+              if (sv3dOpen) { setSv3dOpen(false); return; }
+              const center = mapRef.current?.getCenter?.();
+              const start = sv.visible && sv.pos ? sv.pos : sv3dPosition ?? center3D ?? (center ? { lat: center.lat(), lng: center.lng() } : { lat: -15.78, lng: -47.93 });
+              setSv3dPosition(start);
+              setSv3dHeading(sv.visible ? sv.heading ?? 0 : sv3dHeading);
+              setSv3dOpen(true);
+            }}
+          >
+            <MapPinned className="size-4" aria-hidden="true" />
+          </button>
           {viewMode === "2d" && <div className="earth-seg">
             {tools.map((t) => (
               <button

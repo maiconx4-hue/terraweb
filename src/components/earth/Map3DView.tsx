@@ -11,6 +11,7 @@ type Props = {
   initialZoom: number;
   focusRequest?: { center: LatLng; nonce: number } | null;
   onSelect: (id: string) => void;
+  onUpdate: (id: string, patch: Partial<GeoNode>) => void;
   onCenterChange?: (center: LatLng) => void;
 };
 
@@ -77,6 +78,7 @@ export function Map3DView({
   initialZoom,
   focusRequest,
   onSelect,
+  onUpdate,
   onCenterChange,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -85,11 +87,14 @@ export function Map3DView({
   const overlaysRef = useRef(new Map<string, OverlayRecord>());
   const centerListenerRef = useRef<(() => void) | null>(null);
   const onSelectRef = useRef(onSelect);
+  const onUpdateRef = useRef(onUpdate);
+  const dragMarkerRef = useRef<{ id: string; element: any; pointerId: number; position: LatLng } | null>(null);
   const onCenterChangeRef = useRef(onCenterChange);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
   onSelectRef.current = onSelect;
+  onUpdateRef.current = onUpdate;
   onCenterChangeRef.current = onCenterChange;
 
   useEffect(() => {
@@ -183,6 +188,22 @@ export function Map3DView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Finaliza o arraste de um marcador sem transformar o gesto em navegação da câmera.
+  useEffect(() => {
+    const finish = (event: PointerEvent) => {
+      const drag = dragMarkerRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      dragMarkerRef.current = null;
+      onUpdateRef.current(drag.id, { coords: [drag.position] });
+    };
+    window.addEventListener("pointerup", finish, true);
+    window.addEventListener("pointercancel", finish, true);
+    return () => {
+      window.removeEventListener("pointerup", finish, true);
+      window.removeEventListener("pointercancel", finish, true);
+    };
+  }, []);
+
   // Sincroniza somente os objetos que realmente mudaram.
   // Selecionar um item não desmonta centenas de outros marcadores.
   useEffect(() => {
@@ -233,7 +254,31 @@ export function Map3DView({
         let element: any;
         if (node.kind === "marker" && markerClass) {
           element = new markerClass();
-          element.addEventListener?.("gmp-click", () => onSelectRef.current(node.id));
+          element.addEventListener?.("gmp-click", () => {
+            if (!dragMarkerRef.current) onSelectRef.current(node.id);
+          });
+          // O evento gmp-pointermove fornece a coordenada geográfica real sob o cursor.
+          element.addEventListener?.("pointerdown", (event: PointerEvent) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onSelectRef.current(node.id);
+            const current = element.position;
+            if (!current) return;
+            dragMarkerRef.current = {
+              id: node.id, element, pointerId: event.pointerId,
+              position: { lat: Number(current.lat), lng: Number(current.lng) },
+            };
+          });
+          element.addEventListener?.("gmp-pointermove", (event: any) => {
+            const drag = dragMarkerRef.current;
+            const position = event.position;
+            if (!drag || drag.id !== node.id || !position) return;
+            const next = { lat: Number(position.lat), lng: Number(position.lng) };
+            if (!Number.isFinite(next.lat) || !Number.isFinite(next.lng)) return;
+            drag.position = next;
+            drag.element.position = { ...next, altitude: 0 };
+          });
         } else if (node.kind === "polygon" && polygonClass) {
           element = new polygonClass();
           element.addEventListener?.("gmp-click", () => onSelectRef.current(node.id));
@@ -262,6 +307,8 @@ export function Map3DView({
         element.drawsWhenOccluded = true;
         element.collisionBehavior = "OPTIONAL_AND_HIDES_LOWER_PRIORITY";
         element.zIndex = selected ? 10000 : 1;
+        element.style.filter = selected ? "drop-shadow(0 0 5px #facc15) drop-shadow(0 0 2px #facc15)" : "none";
+        element.style.cursor = "grab";
       } else if (node.kind === "polygon") {
         // Polygon3D não oferece fillOpacity/strokeOpacity.
         // A transparência é aplicada no próprio valor CSS da cor.
