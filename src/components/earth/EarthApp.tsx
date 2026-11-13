@@ -1,7 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
-import { MousePointer2, MapPin, Pentagon, Route as RouteIcon, Ruler, MapPinned } from "lucide-react";
+import { MousePointer2, MapPin, Pentagon, Route as RouteIcon, Ruler, MapPinned, Grip } from "lucide-react";
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { toast } from "sonner";
 import {
   defaultStyle, descendantIds, isFeature, isShown, uid,
@@ -128,6 +128,48 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   const [goto, setGoto] = useState("");
   const [ftthOpen, setFtthOpen] = useState(false);
   const [savedMeasure, setSavedMeasure] = useState<number | null>(null);
+  const [toolbarPosition, setToolbarPosition] = useState({ x: 12, y: 12 });
+  const toolbarDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const startToolbarDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    const toolbar = event.currentTarget.parentElement;
+    const bounds = toolbar?.parentElement?.getBoundingClientRect();
+    if (!toolbar || !bounds) return;
+    event.preventDefault();
+    event.stopPropagation();
+    toolbarDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: toolbarPosition.x,
+      originY: toolbarPosition.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveToolbarDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = toolbarDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const toolbar = event.currentTarget.parentElement;
+    const bounds = toolbar?.parentElement?.getBoundingClientRect();
+    if (!toolbar || !bounds) return;
+    const maxX = Math.max(0, bounds.width - toolbar.offsetWidth);
+    const maxY = Math.max(0, bounds.height - toolbar.offsetHeight);
+    setToolbarPosition({
+      x: Math.min(maxX, Math.max(0, drag.originX + event.clientX - drag.startX)),
+      y: Math.min(maxY, Math.max(0, drag.originY + event.clientY - drag.startY)),
+    });
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const stopToolbarDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (toolbarDragRef.current?.pointerId !== event.pointerId) return;
+    toolbarDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    event.stopPropagation();
+  };
 
   const mapDiv = useRef<HTMLDivElement>(null);
   const cursorDisplayRef = useRef<HTMLDivElement>(null);
@@ -565,7 +607,19 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           </div>
         )}
 
-        <div className="earth-toolbar">
+        <div className="earth-toolbar" style={{ left: toolbarPosition.x, top: toolbarPosition.y }}>
+          <button
+            type="button"
+            className="earth-toolbar-drag"
+            title="Arrastar barra de ferramentas"
+            aria-label="Arrastar barra de ferramentas"
+            onPointerDown={startToolbarDrag}
+            onPointerMove={moveToolbarDrag}
+            onPointerUp={stopToolbarDrag}
+            onPointerCancel={stopToolbarDrag}
+          >
+            <Grip className="size-4" aria-hidden="true" />
+          </button>
           <div className="earth-seg mr-1">
             <button className="earth-seg-btn" data-active={viewMode === "2d"} onClick={() => setViewMode("2d")} title="Mapa vetorial 2D">2D</button>
             <button className="earth-seg-btn" data-active={viewMode === "3d"} onClick={() => { updateDraft([]); modeRef.current = "none"; setMode("none"); setHasOpened3D(true); setViewMode("3d"); }} title="Exploração orbital 3D" disabled={!ready}>3D Orbital</button>
