@@ -55,7 +55,7 @@ export function StreetViewMiniMap({ pos, heading, nodes, filter, onMove }: Props
       if (!isShown(nodes, f, filter)) continue;
       const s = f.style;
       if (f.kind === "polygon") shapes.current.push(new g.maps.Polygon({ map: m, paths: f.coords, clickable: false, strokeColor: s.color, strokeWeight: s.strokeWidth, strokeOpacity: s.strokeOpacity, fillColor: s.fillColor, fillOpacity: s.fillOpacity }));
-      else if (f.kind === "path") shapes.current.push(new g.maps.Polyline({ map: m, path: f.coords, clickable: false, strokeColor: s.color, strokeWeight: s.strokeWidth }));
+      else if (f.kind === "path") shapes.current.push(new g.maps.Polyline({ map: m, path: f.coords, clickable: false, strokeColor: s.color, strokeWeight: s.strokeWidth, strokeOpacity: s.strokeOpacity }));
       else shapes.current.push(new g.maps.Marker({ map: m, position: f.coords[0], clickable: false, icon: { path: "M 0 -6 L 6 5 L -6 5 Z", fillColor: s.color, fillOpacity: 1, strokeColor: "#000000", strokeWeight: 1, scale: 0.9 } }));
     }
   }, [nodes, filter, open]);

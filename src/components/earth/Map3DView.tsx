@@ -11,6 +11,7 @@ type Props = {
   initialZoom: number;
   focusRequest?: { center: LatLng; nonce: number } | null;
   onSelect: (id: string) => void;
+  onCenterChange?: (center: LatLng) => void;
 };
 
 type OverlayRecord = {
@@ -77,16 +78,20 @@ export function Map3DView({
   initialZoom,
   focusRequest,
   onSelect,
+  onCenterChange,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const libraryRef = useRef<any>(null);
   const overlaysRef = useRef(new Map<string, OverlayRecord>());
+  const centerListenerRef = useRef<(() => void) | null>(null);
   const onSelectRef = useRef(onSelect);
+  const onCenterChangeRef = useRef(onCenterChange);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
   onSelectRef.current = onSelect;
+  onCenterChangeRef.current = onCenterChange;
 
   useEffect(() => {
     let cancelled = false;
@@ -143,8 +148,17 @@ export function Map3DView({
         map.addEventListener("gmp-error", handleMapError);
         map.addEventListener("gmp-map-id-error", handleMapIdError);
 
+        const syncCenter = () => {
+          const center = map.center;
+          if (center && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
+            onCenterChangeRef.current?.({ lat: center.lat, lng: center.lng });
+          }
+        };
+        map.addEventListener("gmp-centerchange", syncCenter);
+        centerListenerRef.current = syncCenter;
         hostRef.current.replaceChildren(map);
         mapRef.current = map;
+        syncCenter();
         if (!cancelled) setStatus("ready");
       } catch (e: any) {
         if (!cancelled) {
@@ -162,6 +176,8 @@ export function Map3DView({
       overlaysRef.current.clear();
       map?.removeEventListener?.("gmp-error", handleMapError);
       map?.removeEventListener?.("gmp-map-id-error", handleMapIdError);
+      if (centerListenerRef.current) map?.removeEventListener?.("gmp-centerchange", centerListenerRef.current);
+      centerListenerRef.current = null;
       mapRef.current = null;
       libraryRef.current = null;
       hostRef.current?.replaceChildren();

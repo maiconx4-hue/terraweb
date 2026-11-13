@@ -14,6 +14,7 @@ import {
   Download,
   Search,
   Globe2,
+  UserRound,
 } from "lucide-react";
 
 import {
@@ -37,6 +38,8 @@ interface Props {
   onAddFolder: () => void;
   onImport: (f: File) => void;
   onExport: (f: "kml" | "kmz") => void;
+  userId?: string;
+  userEmail?: string;
 }
 
 const KIND_LABEL: Record<FeatureKind, string> = {
@@ -314,10 +317,22 @@ export function Sidebar(p: Props) {
   return (
     <aside className="earth-sidebar">
       <header className="flex items-center gap-2 px-4 pt-4 pb-3">
-        <Globe2 className="size-5 text-primary" />
-        <h1 className="font-display text-lg font-semibold tracking-tight">
+        <Globe2 className="size-5 shrink-0 text-primary" />
+        <h1 className="min-w-0 flex-1 font-display text-lg font-semibold tracking-tight">
           Terra Web
         </h1>
+        {p.userId && (
+          <a
+            href="/conta"
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`${p.userEmail ?? "Minha conta"} — abrir conta em nova aba`}
+            aria-label="Minha conta"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-foreground transition-colors hover:bg-muted"
+          >
+            <UserRound className="size-4" aria-hidden="true" />
+          </a>
+        )}
       </header>
 
       <div className="space-y-2 px-3 pb-3">

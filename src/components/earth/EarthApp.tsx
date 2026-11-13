@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { MousePointer2, MapPin, Pentagon, Route as RouteIcon, Ruler, MapPinned } from "lucide-react";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,6 +13,7 @@ import { Properties } from "./Properties";
 import { FtthDialog } from "./FtthDialog";
 import { StreetViewMiniMap } from "./StreetViewMiniMap";
 import { Map3DView } from "./Map3DView";
+import { StreetView3DPanel } from "./StreetView3DPanel";
 import { showDraftVertices } from "./draftVertices";
 import {
   MARKER_DEFAULT_NAME, POLYGON_DEFAULT_DESCRIPTION, POLYGON_DEFAULT_NAME,
@@ -118,7 +120,11 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
   const [hasOpened3D, setHasOpened3D] = useState(false);
   const [focus3D, setFocus3D] = useState<{ center: LatLng; nonce: number } | null>(null);
+  const [center3D, setCenter3D] = useState<LatLng>({ lat: -15.78, lng: -47.93 });
   const [sv, setSv] = useState<{ visible: boolean; pos: LatLng | null; heading: number }>({ visible: false, pos: null, heading: 0 });
+  const [sv3dOpen, setSv3dOpen] = useState(false);
+  const [sv3dPosition, setSv3dPosition] = useState<LatLng | null>(null);
+  const [sv3dHeading, setSv3dHeading] = useState(0);
   const [goto, setGoto] = useState("");
   const [ftthOpen, setFtthOpen] = useState(false);
   const [savedMeasure, setSavedMeasure] = useState<number | null>(null);
@@ -516,11 +522,11 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
 
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
   const tools: { id: Mode; label: string; hint: string }[] = [
-    { id: "none", label: "Navegar", hint: "Mover o mapa" },
-    { id: "marker", label: "Marcador", hint: "Clique no mapa" },
-    { id: "polygon", label: "Polígono", hint: "Clique os vértices, duplo clique conclui" },
-    { id: "path", label: "Caminho", hint: "Clique os pontos, duplo clique conclui" },
-    { id: "ruler", label: "Régua", hint: "Clique os pontos para medir" },
+    { id: "none", label: "Navegar", hint: "Mover o mapa", Icon: MousePointer2 },
+    { id: "marker", label: "Marcador", hint: "Clique no mapa", Icon: MapPin },
+    { id: "polygon", label: "Polígono", hint: "Clique os vértices, duplo clique conclui", Icon: Pentagon },
+    { id: "path", label: "Caminho", hint: "Clique os pontos, duplo clique conclui", Icon: RouteIcon },
+    { id: "ruler", label: "Régua", hint: "Clique os pontos para medir", Icon: Ruler },
   ];
 
   return (
@@ -538,6 +544,8 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         onAddFolder={addFolder}
         onImport={onImport}
         onExport={(f) => onExport(f)}
+        userId={userId}
+        userEmail={userEmail}
       />
 
       <main className="earth-main">
@@ -552,14 +560,9 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               initialZoom={mapRef.current?.getZoom?.() ?? zoom}
               focusRequest={focus3D}
               onSelect={setSelectedId}
+              onCenterChange={setCenter3D}
             />
           </div>
-        )}
-        {userId && (
-          <a href="/conta" target="_blank" rel="noopener" title={`${userEmail ?? ""} — abrir conta em nova aba`} aria-label="Minha conta"
-            className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-md hover:bg-muted">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></svg>
-          </a>
         )}
 
         <div className="earth-toolbar">
@@ -567,16 +570,41 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
             <button className="earth-seg-btn" data-active={viewMode === "2d"} onClick={() => setViewMode("2d")} title="Mapa vetorial 2D">2D</button>
             <button className="earth-seg-btn" data-active={viewMode === "3d"} onClick={() => { updateDraft([]); modeRef.current = "none"; setMode("none"); setHasOpened3D(true); setViewMode("3d"); }} title="Exploração orbital 3D" disabled={!ready}>3D Orbital</button>
           </div>
+          {viewMode === "3d" && (
+            <button
+              type="button"
+              className="earth-seg-btn earth-tool-icon"
+              title={sv3dOpen ? "Fechar Street View" : "Abrir Street View no modo 3D"}
+              aria-label={sv3dOpen ? "Fechar Street View" : "Abrir Street View no modo 3D"}
+              data-active={sv3dOpen}
+              onClick={() => {
+                if (sv3dOpen) { setSv3dOpen(false); return; }
+                const center = mapRef.current?.getCenter?.();
+                const start = sv.visible && sv.pos
+                  ? sv.pos
+                  : sv3dPosition ?? (viewMode === "3d"
+                    ? center3D
+                    : center ? { lat: center.lat(), lng: center.lng() } : { lat: -15.78, lng: -47.93 });
+                setSv3dPosition(start);
+                if (sv.visible) setSv3dHeading(sv.heading ?? 0);
+                setSv3dOpen(true);
+              }}
+            >
+              <MapPinned className="size-4" aria-hidden="true" />
+            </button>
+          )}
           {viewMode === "2d" && <div className="earth-seg">
             {tools.map((t) => (
               <button
                 key={t.id}
-                title={t.hint}
+                type="button"
+                title={`${t.label} — ${t.hint}`}
+                aria-label={t.label}
                 data-active={mode === t.id}
                 onClick={() => { updateDraft([]); modeRef.current = t.id; setMode(t.id); }}
-                className="earth-seg-btn"
+                className="earth-seg-btn earth-tool-icon"
               >
-                {t.label}
+                <t.Icon className="size-4" aria-hidden="true" />
               </button>
             ))}
           </div>}
@@ -631,6 +659,17 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           <StreetViewMiniMap
             pos={sv.pos} heading={sv.heading} nodes={nodes} filter={filter}
             onMove={(p) => mapRef.current?.getStreetView().setPosition(p)}
+          />
+        )}
+
+        {viewMode === "3d" && sv3dOpen && sv3dPosition && (
+          <StreetView3DPanel
+            initialPosition={sv3dPosition}
+            initialHeading={sv3dHeading}
+            nodes={nodes}
+            filter={filter}
+            onClose={() => setSv3dOpen(false)}
+            onChange={({ pos, heading }) => { setSv3dPosition(pos); setSv3dHeading(heading); }}
           />
         )}
 
