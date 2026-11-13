@@ -11,7 +11,6 @@ import { buildKml, buildKmz, downloadBlob, readGeoFile } from "@/lib/geo/kml";
 import { Sidebar } from "./Sidebar";
 import { Properties } from "./Properties";
 import { FtthDialog } from "./FtthDialog";
-import { StreetViewMiniMap } from "./StreetViewMiniMap";
 import { Map3DView } from "./Map3DView";
 import { StreetView3DPanel } from "./StreetView3DPanel";
 import { showDraftVertices } from "./draftVertices";
@@ -260,7 +259,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           tiltInteractionEnabled: true,
           headingInteractionEnabled: true,
           clickableIcons: false,
-          streetViewControl: true,
+          streetViewControl: false,
           fullscreenControl: false,
           mapTypeControl: false,
           rotateControl: true,
@@ -563,7 +562,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   };
 
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
-  const tools: { id: Mode; label: string; hint: string }[] = [
+  const tools: { id: Mode; label: string; hint: string; Icon: typeof MousePointer2 }[] = [
     { id: "none", label: "Navegar", hint: "Mover o mapa", Icon: MousePointer2 },
     { id: "marker", label: "Marcador", hint: "Clique no mapa", Icon: MapPin },
     { id: "polygon", label: "Polígono", hint: "Clique os vértices, duplo clique conclui", Icon: Pentagon },
@@ -604,6 +603,18 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               onSelect={setSelectedId}
               onUpdate={(id, patch) => dispatch({ type: "update", id, patch })}
               onCenterChange={setCenter3D}
+              mapStyle={mapType === "satellite" ? "satellite" : "hybrid"}
+              mode={mode}
+              draft={draft}
+              onMapPoint={(point) => {
+                if (modeRef.current === "marker") createFeature("marker", [point]);
+                else if (modeRef.current === "polygon" || modeRef.current === "path" || modeRef.current === "ruler") {
+                  updateDraft((current) => {
+                    const last = current.at(-1);
+                    return last && last.lat === point.lat && last.lng === point.lng ? current : [...current, point];
+                  });
+                }
+              }}
             />
           </div>
         )}
@@ -623,56 +634,44 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           </button>
           <div className="earth-seg mr-1">
             <button className="earth-seg-btn" data-active={viewMode === "2d"} onClick={() => {
-              if (viewMode === "3d" && sv3dOpen && sv3dPosition) {
-                const pano = mapRef.current?.getStreetView();
-                pano?.setPosition(sv3dPosition);
-                pano?.setPov({ heading: sv3dHeading, pitch: 0 });
-                pano?.setVisible(true);
-                setSv3dOpen(false);
-              }
+              if (center3D && mapRef.current) mapRef.current.setCenter(center3D);
               setViewMode("2d");
             }} title="Mapa vetorial 2D">2D</button>
             <button className="earth-seg-btn" data-active={viewMode === "3d"} onClick={() => {
-              updateDraft([]); modeRef.current = "none"; setMode("none"); setHasOpened3D(true);
-              const pano = mapRef.current?.getStreetView();
-              if (pano?.getVisible()) {
-                const pos = pano.getPosition();
-                if (pos) setSv3dPosition({ lat: pos.lat(), lng: pos.lng() });
-                setSv3dHeading(pano.getPov()?.heading ?? 0);
-                pano.setVisible(false);
-                setSv3dOpen(true);
-              }
+              const center = mapRef.current?.getCenter?.();
+              const currentCenter = center ? { lat: center.lat(), lng: center.lng() } : center3D;
+              if (mapType !== "hybrid" && mapType !== "satellite") setMapType("hybrid");
+              setFocus3D({ center: currentCenter, nonce: Date.now() });
+              setHasOpened3D(true);
               setViewMode("3d");
             }} title="Exploração orbital 3D" disabled={!ready}>3D Orbital</button>
           </div>
           <button
             type="button"
             className="earth-seg-btn earth-tool-icon"
-            title={viewMode === "2d" ? (sv.visible ? "Fechar Street View" : "Abrir Street View no modo 2D") : (sv3dOpen ? "Fechar Street View" : "Abrir Street View no modo 3D")}
+            title={sv3dOpen ? "Fechar Street View" : "Abrir Street View"}
             aria-label="Street View"
-            data-active={viewMode === "2d" ? sv.visible : sv3dOpen}
+            data-active={sv3dOpen}
             onClick={() => {
-              if (viewMode === "2d") {
-                const pano = mapRef.current?.getStreetView();
-                if (pano?.getVisible()) { pano.setVisible(false); return; }
-                const center = mapRef.current?.getCenter?.();
-                const start = sv3dPosition ?? (center ? { lat: center.lat(), lng: center.lng() } : { lat: -15.78, lng: -47.93 });
-                pano?.setPosition(sv.pos ?? start);
-                pano?.setPov({ heading: sv.heading ?? sv3dHeading, pitch: 0 });
-                pano?.setVisible(true);
+              if (sv3dOpen) {
+                setSv3dOpen(false);
                 return;
               }
-              if (sv3dOpen) { setSv3dOpen(false); return; }
-              const center = mapRef.current?.getCenter?.();
-              const start = sv.visible && sv.pos ? sv.pos : sv3dPosition ?? center3D ?? (center ? { lat: center.lat(), lng: center.lng() } : { lat: -15.78, lng: -47.93 });
+              const center = viewMode === "3d"
+                ? center3D
+                : (() => {
+                    const c = mapRef.current?.getCenter?.();
+                    return c ? { lat: c.lat(), lng: c.lng() } : null;
+                  })();
+              const start = sv3dPosition ?? sv.pos ?? center ?? { lat: -15.78, lng: -47.93 };
               setSv3dPosition(start);
-              setSv3dHeading(sv.visible ? sv.heading ?? 0 : sv3dHeading);
+              setSv3dHeading(sv3dHeading || sv.heading || 0);
               setSv3dOpen(true);
             }}
           >
             <MapPinned className="size-4" aria-hidden="true" />
           </button>
-          {viewMode === "2d" && <div className="earth-seg">
+          <div className="earth-seg">
             {tools.map((t) => (
               <button
                 key={t.id}
@@ -686,22 +685,22 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
                 <t.Icon className="size-4" aria-hidden="true" />
               </button>
             ))}
-          </div>}
-          {viewMode === "2d" && (
-            <select value={mapType} onChange={(e) => setMapType(e.target.value)} className="earth-input w-36">
-              <option value="hybrid">Satélite + rótulos</option>
-              <option value="satellite">Satélite</option>
+          </div>
+          <select value={mapType} onChange={(e) => setMapType(e.target.value)} className="earth-input w-36">
+            <option value="hybrid">Satélite + rótulos</option>
+            <option value="satellite">Satélite</option>
+            {viewMode === "2d" && <>
               <option value="terrain">Relevo</option>
               <option value="roadmap">Mapa</option>
-            </select>
-          )}
+            </>}
+          </select>
           <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); onGoto(); }}>
             <input value={goto} onChange={(e) => setGoto(e.target.value)} placeholder="-23.5505, -46.6333" className="earth-input w-48 font-mono" />
             <button className="earth-btn">Ir</button>
           </form>
         </div>
 
-        {viewMode === "2d" && mode === "ruler" && (
+        {mode === "ruler" && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
             <span className="font-mono text-sm">{fmtM(pathLengthM(draft))} m</span>
             <button className="earth-btn" onClick={() => updateDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Desfazer</button>
@@ -716,7 +715,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           </div>
         )}
 
-        {viewMode === "2d" && (mode === "polygon" || mode === "path") && (
+        {(mode === "polygon" || mode === "path") && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
             <span className="text-sm">{draft.length} pontos · duplo clique ou Enter conclui · Esc cancela</span>
             <button className="earth-btn" onClick={() => updateDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Desfazer</button>
@@ -724,24 +723,17 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           </div>
         )}
 
-        {viewMode === "2d" && sv.visible && sv.pos && (
-          <div className="earth-float top-16 left-1/2 -translate-x-1/2">
+        {sv3dOpen && sv3dPosition && (
+          <div className="earth-float top-16 left-1/2 z-40 -translate-x-1/2">
             <span className="font-mono text-xs">
-              {sv.pos.lat.toFixed(6)}, {sv.pos.lng.toFixed(6)} · {Math.round(((sv.heading % 360) + 360) % 360)}°
+              {sv3dPosition.lat.toFixed(6)}, {sv3dPosition.lng.toFixed(6)} · {Math.round(((sv3dHeading % 360) + 360) % 360)}°
             </span>
             <button className="earth-btn" onClick={() => addSvMarker(false)}>+ Marcador aqui</button>
             <button className="earth-btn-primary" onClick={() => addSvMarker(true)}>+ Marcador à frente</button>
           </div>
         )}
 
-        {viewMode === "2d" && sv.visible && sv.pos && (
-          <StreetViewMiniMap
-            pos={sv.pos} heading={sv.heading} nodes={nodes} filter={filter}
-            onMove={(p) => mapRef.current?.getStreetView().setPosition(p)}
-          />
-        )}
-
-        {viewMode === "3d" && sv3dOpen && sv3dPosition && (
+        {sv3dOpen && sv3dPosition && (
           <StreetView3DPanel
             initialPosition={sv3dPosition}
             initialHeading={sv3dHeading}

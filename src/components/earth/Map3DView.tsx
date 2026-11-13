@@ -13,6 +13,10 @@ type Props = {
   onSelect: (id: string) => void;
   onUpdate: (id: string, patch: Partial<GeoNode>) => void;
   onCenterChange?: (center: LatLng) => void;
+  mode?: "none" | "marker" | "polygon" | "path" | "ruler";
+  draft?: LatLng[];
+  onMapPoint?: (point: LatLng) => void;
+  mapStyle?: "hybrid" | "satellite";
 };
 
 type OverlayRecord = {
@@ -80,6 +84,10 @@ export function Map3DView({
   onSelect,
   onUpdate,
   onCenterChange,
+  mode = "none",
+  draft = [],
+  onMapPoint,
+  mapStyle = "hybrid",
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -90,12 +98,16 @@ export function Map3DView({
   const onUpdateRef = useRef(onUpdate);
   const dragMarkerRef = useRef<{ id: string; element: any; pointerId: number; position: LatLng } | null>(null);
   const onCenterChangeRef = useRef(onCenterChange);
+  const onMapPointRef = useRef(onMapPoint);
+  const modeRef = useRef(mode);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
   onSelectRef.current = onSelect;
   onUpdateRef.current = onUpdate;
   onCenterChangeRef.current = onCenterChange;
+  onMapPointRef.current = onMapPoint;
+  modeRef.current = mode;
 
   useEffect(() => {
     let cancelled = false;
@@ -136,7 +148,7 @@ export function Map3DView({
           roll: 0,
           minTilt: 0,
           maxTilt: 85,
-          mode: "HYBRID",
+          mode: mapStyle.toUpperCase(),
           gestureHandling: "GREEDY",
           qualityMode: "PERFORMANCE",
           defaultUIHidden: false,
@@ -157,6 +169,14 @@ export function Map3DView({
           }
         };
         map.addEventListener("gmp-centerchange", syncCenter);
+        const handleMapClick = (event: any) => {
+          const position = event?.position;
+          if (!position || modeRef.current === "none") return;
+          const point = { lat: Number(position.lat), lng: Number(position.lng) };
+          if (Number.isFinite(point.lat) && Number.isFinite(point.lng)) onMapPointRef.current?.(point);
+        };
+        map.addEventListener("gmp-click", handleMapClick);
+        (map as any).__terraClickListener = handleMapClick;
         centerListenerRef.current = syncCenter;
         hostRef.current.replaceChildren(map);
         mapRef.current = map;
@@ -175,9 +195,11 @@ export function Map3DView({
     return () => {
       cancelled = true;
       overlaysRef.current.forEach(({ element }) => element.remove?.());
+      ((map as any)?.__terraDraft ?? []).forEach((element: any) => element.remove?.());
       overlaysRef.current.clear();
       map?.removeEventListener?.("gmp-error", handleMapError);
       map?.removeEventListener?.("gmp-map-id-error", handleMapIdError);
+      if ((map as any)?.__terraClickListener) map.removeEventListener?.("gmp-click", (map as any).__terraClickListener);
       if (centerListenerRef.current) map?.removeEventListener?.("gmp-centerchange", centerListenerRef.current);
       centerListenerRef.current = null;
       mapRef.current = null;
@@ -254,7 +276,8 @@ export function Map3DView({
         let element: any;
         if (node.kind === "marker" && markerClass) {
           element = new markerClass();
-          element.addEventListener?.("gmp-click", () => {
+          element.addEventListener?.("gmp-click", (event: Event) => {
+            event.stopPropagation();
             if (!dragMarkerRef.current) onSelectRef.current(node.id);
           });
           // O evento gmp-pointermove fornece a coordenada geográfica real sob o cursor.
@@ -281,10 +304,10 @@ export function Map3DView({
           });
         } else if (node.kind === "polygon" && polygonClass) {
           element = new polygonClass();
-          element.addEventListener?.("gmp-click", () => onSelectRef.current(node.id));
+          element.addEventListener?.("gmp-click", (event: Event) => { event.stopPropagation(); onSelectRef.current(node.id); });
         } else if (node.kind === "path" && lineClass) {
           element = new lineClass();
-          element.addEventListener?.("gmp-click", () => onSelectRef.current(node.id));
+          element.addEventListener?.("gmp-click", (event: Event) => { event.stopPropagation(); onSelectRef.current(node.id); });
         }
 
         if (!element) {
@@ -301,7 +324,7 @@ export function Map3DView({
       const style = node.style;
 
       if (node.kind === "marker") {
-        element.position = coords[0];
+        if (dragMarkerRef.current?.id !== node.id) element.position = coords[0];
         element.label = node.name || "Marcador";
         element.title = node.name || "Marcador";
         element.drawsWhenOccluded = true;
@@ -339,6 +362,45 @@ export function Map3DView({
       }
     }
   }, [nodes, filter, selectedId]);
+
+  useEffect(() => {
+    if (mapRef.current) mapRef.current.mode = mapStyle.toUpperCase();
+  }, [mapStyle]);
+
+  // Pré-visualização dos desenhos em andamento no próprio mapa 3D.
+  useEffect(() => {
+    const map = mapRef.current;
+    const lib = libraryRef.current;
+    if (!map || !lib) return;
+    const previous = (map as any).__terraDraft as any[] | undefined;
+    previous?.forEach((element) => element.remove?.());
+    (map as any).__terraDraft = [];
+    if (!draft.length) return;
+    const path = draft.map((point) => ({ ...point, altitude: 0 }));
+    const lineClass = lib.Polyline3DElement;
+    const polygonClass = lib.Polygon3DElement;
+    const line = new lineClass({
+      path,
+      strokeColor: mode === "ruler" ? "#f43f5e" : "#facc15",
+      strokeWidth: 3,
+      drawsOccludedSegments: true,
+      geodesic: true,
+    });
+    map.append(line);
+    (map as any).__terraDraft.push(line);
+    if (mode === "polygon" && path.length >= 3 && polygonClass) {
+      const polygon = new polygonClass({
+        path,
+        strokeColor: "#facc15",
+        strokeWidth: 2,
+        fillColor: "rgba(250, 204, 21, 0.22)",
+        drawsOccludedSegments: true,
+        geodesic: true,
+      });
+      map.append(polygon);
+      (map as any).__terraDraft.push(polygon);
+    }
+  }, [draft, mode, status]);
 
   useEffect(() => {
     if (!focusRequest || !mapRef.current) return;

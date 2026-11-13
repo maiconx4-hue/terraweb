@@ -14,7 +14,7 @@ type Props = {
   onChange: (state: StreetViewState) => void;
 };
 
-/** Panorama independente sobre o globo 3D; não altera nem recria o Map3DElement. */
+/** Painel Street View compartilhado entre os modos 2D e 3D; não altera o mapa-base. */
 export function StreetView3DPanel({
   initialPosition,
   initialHeading = 0,
@@ -119,7 +119,7 @@ export function StreetView3DPanel({
         left: panelPosition?.left, top: panelPosition?.top, right: panelPosition ? undefined : 16, bottom: panelPosition ? undefined : 16,
         width: 'min(1120px, 82vw, calc(100% - 32px))', height: 'min(760px, 82vh, calc(100% - 88px))',
       }}
-      aria-label="Street View no modo 3D"
+      aria-label="Street View compartilhado entre os modos 2D e 3D"
     >
       <div ref={hostRef} className="absolute inset-0" style={{ top: 44 }} />
       <div
