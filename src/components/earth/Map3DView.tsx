@@ -99,6 +99,7 @@ export function Map3DView({
   mode = "none",
   onCreateMarker,
   onDraftPoint,
+  onDraftMove,
   draftPoints = [],
   draftCursor = null,
 }: Props) {

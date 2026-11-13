@@ -620,6 +620,9 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
                 const last = d.at(-1);
                 return last && last.lat === point.lat && last.lng === point.lng ? d : [...d, point];
               })}
+              draftPoints={draft}
+              draftCursor={draftCursor3D}
+              onDraftMove={setDraftCursor3D}
             />
           </div>
         )}
