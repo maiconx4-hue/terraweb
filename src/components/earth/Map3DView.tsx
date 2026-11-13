@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 import { Compass, LocateFixed, LoaderCircle } from "lucide-react";
-import { isFeature, passesFilter, type Filter, type GeoNode, type LatLng } from "@/lib/geo/types";
+import { isFeature, passesFilter, TRIANGLE_ICON_URL, type Filter, type GeoNode, type LatLng } from "@/lib/geo/types";
 
 type Props = {
   nodes: GeoNode[];
@@ -21,6 +21,7 @@ type Props = {
 type OverlayRecord = {
   kind: "marker" | "polygon" | "path";
   element: any;
+  interactionElement?: any;
   signature: string;
 };
 
@@ -56,6 +57,15 @@ const toRgba = (color: string, opacity: number) => {
 
   // Cores CSS nomeadas ou formatos já válidos permanecem utilizáveis.
   return hex || `rgba(255, 255, 255, ${alpha})`;
+};
+
+const eventLatLng = (event: any): LatLng | null => {
+  const raw = event?.position ?? event?.detail?.position ?? event?.latLngAltitude ??
+    event?.detail?.latLngAltitude ?? event?.detail?.location;
+  if (!raw) return null;
+  const lat = Number(raw.lat);
+  const lng = Number(raw.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
 };
 
 const geometrySignature = (node: Extract<GeoNode, { kind: "marker" | "polygon" | "path" }>, selected: boolean) =>
@@ -197,7 +207,10 @@ export function Map3DView({
 
     return () => {
       cancelled = true;
-      overlaysRef.current.forEach(({ element }) => element.remove?.());
+      overlaysRef.current.forEach(({ element, interactionElement }) => {
+        element.remove?.();
+        interactionElement?.remove?.();
+      });
       overlaysRef.current.clear();
       map?.removeEventListener?.("gmp-error", handleMapError);
       map?.removeEventListener?.("gmp-map-id-error", handleMapIdError);
@@ -263,14 +276,13 @@ export function Map3DView({
         if (event.button !== 0) return;
         event.preventDefault();
         event.stopPropagation();
+        handle.setPointerCapture?.(event.pointerId);
         active = { index, pointerId: event.pointerId, position: { ...nextCoords[index]! } };
       });
       handle.addEventListener("gmp-pointermove", (event: any) => {
         if (!active || active.index !== index) return;
-        const raw = event?.position ?? event?.detail?.position;
-        if (!raw) return;
-        const position = { lat: Number(raw.lat), lng: Number(raw.lng) };
-        if (!Number.isFinite(position.lat) || !Number.isFinite(position.lng)) return;
+        const position = eventLatLng(event);
+        if (!position) return;
         active.position = position;
         handle.position = { ...position, altitude: 2 };
         const live = nextCoords.map((coord, i) => i === index ? position : coord);
@@ -297,7 +309,10 @@ export function Map3DView({
     const lib = libraryRef.current;
     if (!map || !lib) return;
 
-    const markerClass = lib.Marker3DInteractiveElement || lib.Marker3DElement;
+    // MarkerInteractiveElement aceita conteúdo HTML (imagem KML), enquanto
+    // Marker3DElement renderiza somente o pin padrão do Google.
+    const markerClass = lib.MarkerInteractiveElement || lib.MarkerElement;
+    const markerHitClass = lib.Marker3DInteractiveElement;
     const polygonClass = lib.Polygon3DInteractiveElement || lib.Polygon3DElement;
     const lineClass = lib.Polyline3DInteractiveElement || lib.Polyline3DElement;
     const liveIds = new Set<string>();
@@ -319,7 +334,7 @@ export function Map3DView({
 
       liveIds.add(node.id);
       const selected = node.id === selectedId;
-      const signature = geometrySignature(node, selected);
+      const signature = `${geometrySignature(node, selected)}:${mode}`;
       const existing = overlaysRef.current.get(node.id);
 
       if (existing && existing.kind === node.kind && existing.signature === signature) {
@@ -336,42 +351,62 @@ export function Map3DView({
 
       if (!record || record.kind !== node.kind) {
         record?.element.remove?.();
+        record?.interactionElement?.remove?.();
 
         let element: any;
+        let interactionElement: any = null;
         if (node.kind === "marker" && markerClass) {
+          // Marcador visual HTML para usar o ícone KML exato.
           element = new markerClass();
-          element.addEventListener?.("gmp-click", () => {
-            if (modeRef.current !== "none") return;
+          element.anchorLeft = "-50%";
+          element.anchorTop = "-50%";
+          element.addEventListener?.("gmp-click", (event: Event) => {
+            event.stopPropagation();
             if (!dragMarkerRef.current) onSelectRef.current(node.id);
           });
-          // O evento gmp-pointermove fornece a coordenada geográfica real sob o cursor.
-          element.addEventListener?.("pointerdown", (event: PointerEvent) => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            event.stopPropagation();
-            onSelectRef.current(node.id);
-            const current = element.position;
-            if (!current) return;
-            dragMarkerRef.current = {
-              id: node.id, element, pointerId: event.pointerId,
-              position: { lat: Number(current.lat), lng: Number(current.lng) },
-            };
-          });
-          element.addEventListener?.("gmp-pointermove", (event: any) => {
-            const drag = dragMarkerRef.current;
-            const position = event.position;
-            if (!drag || drag.id !== node.id || !position) return;
-            const next = { lat: Number(position.lat), lng: Number(position.lng) };
-            if (!Number.isFinite(next.lat) || !Number.isFinite(next.lng)) return;
-            drag.position = next;
-            drag.element.position = { ...next, altitude: 0 };
-          });
+          // O Maps 3D só emite gmp-pointermove no Marker3DInteractiveElement.
+          // Mantemos um hit-target 3D transparente sobre o ícone HTML para permitir arraste geográfico.
+          if (markerHitClass) {
+            interactionElement = new markerHitClass();
+            interactionElement.addEventListener?.("gmp-click", (event: Event) => {
+              event.stopPropagation();
+              if (!dragMarkerRef.current) onSelectRef.current(node.id);
+            });
+            interactionElement.addEventListener?.("pointerdown", (event: PointerEvent) => {
+              if (event.button !== 0 || modeRef.current !== "none") return;
+              event.preventDefault();
+              event.stopPropagation();
+              interactionElement.setPointerCapture?.(event.pointerId);
+              onSelectRef.current(node.id);
+              const current = interactionElement.position;
+              if (!current) return;
+              dragMarkerRef.current = {
+                id: node.id, element: interactionElement, pointerId: event.pointerId,
+                position: { lat: Number(current.lat), lng: Number(current.lng) },
+              };
+            });
+            interactionElement.addEventListener?.("gmp-pointermove", (event: any) => {
+              const drag = dragMarkerRef.current;
+              const next = eventLatLng(event);
+              if (!drag || drag.id !== node.id || !next) return;
+              drag.position = next;
+              drag.element.position = { ...next, altitude: 0 };
+              const visualMarker = overlaysRef.current.get(node.id)?.element;
+              if (visualMarker) visualMarker.position = { ...next, altitude: 0 };
+            });
+          }
         } else if (node.kind === "polygon" && polygonClass) {
           element = new polygonClass();
-          element.addEventListener?.("gmp-click", () => { if (modeRef.current === "none") onSelectRef.current(node.id); });
+          element.addEventListener?.("gmp-click", (event: Event) => {
+            event.stopPropagation();
+            if (modeRef.current === "none") onSelectRef.current(node.id);
+          });
         } else if (node.kind === "path" && lineClass) {
           element = new lineClass();
-          element.addEventListener?.("gmp-click", () => { if (modeRef.current === "none") onSelectRef.current(node.id); });
+          element.addEventListener?.("gmp-click", (event: Event) => {
+            event.stopPropagation();
+            if (modeRef.current === "none") onSelectRef.current(node.id);
+          });
         }
 
         if (!element) {
@@ -379,8 +414,58 @@ export function Map3DView({
           continue;
         }
 
+        if (node.kind === "marker") {
+          const visual = document.createElement("span");
+          visual.className = "terra-3d-marker-visual";
+          visual.style.cssText = [
+            "display:flex", "align-items:center", "justify-content:center",
+            "width:30px", "height:30px", "border-radius:50%",
+            "background:transparent", "box-sizing:border-box",
+            "transition:transform 120ms ease, background 120ms ease, box-shadow 120ms ease",
+          ].join(";");
+          const image = document.createElement("img");
+          image.src = TRIANGLE_ICON_URL;
+          image.alt = node.name || "CTO";
+          image.draggable = false;
+          image.style.cssText = "display:block;width:24px;height:24px;object-fit:contain;pointer-events:none;";
+          visual.append(image);
+          element.append(visual);
+          element.__terraVisual = visual;
+          if (interactionElement) {
+            interactionElement.addEventListener?.("gmp-pointerover", () => {
+              if (node.id !== selectedId) {
+                visual.style.background = "rgba(250, 204, 21, .12)";
+                visual.style.boxShadow = "0 0 0 2px rgba(250,204,21,.75)";
+                visual.style.transform = "scale(1.12)";
+              }
+            });
+            interactionElement.addEventListener?.("gmp-pointerout", () => {
+              if (node.id !== selectedId) {
+                visual.style.background = "transparent";
+                visual.style.boxShadow = "none";
+                visual.style.transform = "scale(1)";
+              }
+            });
+          }
+          element.addEventListener?.("gmp-pointerover", () => {
+            if (node.id !== selectedId) {
+              visual.style.background = "rgba(250, 204, 21, .12)";
+              visual.style.boxShadow = "0 0 0 2px rgba(250,204,21,.75)";
+              visual.style.transform = "scale(1.12)";
+            }
+          });
+          element.addEventListener?.("gmp-pointerout", () => {
+            if (node.id !== selectedId) {
+              visual.style.background = "transparent";
+              visual.style.boxShadow = "none";
+              visual.style.transform = "scale(1)";
+            }
+          });
+        }
+
         map.append(element);
-        record = { kind: node.kind, element, signature: "" };
+        if (interactionElement) map.append(interactionElement);
+        record = { kind: node.kind, element, interactionElement, signature: "" };
         overlaysRef.current.set(node.id, record);
       }
 
@@ -389,13 +474,25 @@ export function Map3DView({
 
       if (node.kind === "marker") {
         element.position = coords[0];
+        if (record.interactionElement) {
+          record.interactionElement.position = coords[0];
+          record.interactionElement.style.opacity = "0";
+          record.interactionElement.style.pointerEvents = mode === "none" ? "auto" : "none";
+          record.interactionElement.collisionBehavior = "REQUIRED";
+          record.interactionElement.zIndex = selected ? 10001 : 2;
+        }
         element.label = node.name || "Marcador";
         element.title = node.name || "Marcador";
-        element.drawsWhenOccluded = true;
-        element.collisionBehavior = "OPTIONAL_AND_HIDES_LOWER_PRIORITY";
+        element.collisionBehavior = "REQUIRED";
+        element.collisionPriority = selected ? 100000 : 1000;
         element.zIndex = selected ? 10000 : 1;
-        element.style.filter = selected ? "drop-shadow(0 0 5px #facc15) drop-shadow(0 0 2px #facc15)" : "none";
-        element.style.cursor = "grab";
+        element.style.cursor = mode === "none" ? "grab" : "crosshair";
+        const visual = element.__terraVisual as HTMLElement | undefined;
+        if (visual) {
+          visual.style.background = selected ? "rgba(250, 204, 21, .22)" : "transparent";
+          visual.style.boxShadow = selected ? "0 0 0 3px #facc15, 0 0 12px 5px rgba(250,204,21,.85)" : "none";
+          visual.style.transform = selected ? "scale(1.22)" : "scale(1)";
+        }
       } else if (node.kind === "polygon") {
         // Polygon3D não oferece fillOpacity/strokeOpacity.
         // A transparência é aplicada no próprio valor CSS da cor.
@@ -422,10 +519,11 @@ export function Map3DView({
     for (const [id, record] of overlaysRef.current) {
       if (!liveIds.has(id)) {
         record.element.remove?.();
+        record.interactionElement?.remove?.();
         overlaysRef.current.delete(id);
       }
     }
-  }, [nodes, filter, selectedId]);
+  }, [nodes, filter, selectedId, mode]);
 
   useEffect(() => {
     if (!focusRequest || !mapRef.current) return;

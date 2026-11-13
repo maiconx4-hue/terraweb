@@ -605,7 +605,12 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               onUpdate={(id, patch) => dispatch({ type: "update", id, patch })}
               onCenterChange={setCenter3D}
               mode={mode}
-              onCreateMarker={(point) => createFeature("marker", [point])}
+              onCreateMarker={(point) => {
+                createFeature("marker", [point]);
+                // Encerra o modo de criação: o novo marcador já fica selecionado
+                // e pode ser movido sem que o próximo clique crie outro marcador.
+                setMode("none");
+              }}
               onDraftPoint={(point) => updateDraft((d) => {
                 const last = d.at(-1);
                 return last && last.lat === point.lat && last.lng === point.lng ? d : [...d, point];
