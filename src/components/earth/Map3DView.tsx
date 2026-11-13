@@ -15,6 +15,8 @@ type Props = {
   onCenterChange?: (center: LatLng) => void;
   mode?: "none" | "marker" | "polygon" | "path" | "ruler";
   draft?: LatLng[];
+  /** CTO sendo arrastada no Street View: move o marcador 3D em tempo real. */
+  liveMarker?: { id: string; pos: LatLng } | null;
   onCreateMarker?: (point: LatLng) => void;
   onExitMarkerMode?: () => void;
   onDraftPoint?: (point: LatLng) => void;
@@ -143,6 +145,7 @@ export function Map3DView({
   onCenterChange,
   mode = "none",
   draft,
+  liveMarker,
   onCreateMarker,
   onExitMarkerMode,
   onDraftPoint,
@@ -329,6 +332,12 @@ export function Map3DView({
       window.removeEventListener("pointercancel", finish, true);
     };
   }, []);
+
+  useEffect(() => {
+    if (!liveMarker) return;
+    const record = overlaysRef.current.get(liveMarker.id);
+    if (record?.kind === "marker") record.element.position = { lat: liveMarker.pos.lat, lng: liveMarker.pos.lng, altitude: 0 };
+  }, [liveMarker]);
 
   // Rascunho durante a criação (polígono, caminho, régua): linha/área amarela e
   // vértices brancos, como no mapa 2D. Usa elementos não interativos para que os

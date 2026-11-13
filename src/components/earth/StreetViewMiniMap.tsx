@@ -8,14 +8,19 @@ type Props = {
   nodes: GeoNode[];
   filter: Filter;
   onMove: (p: LatLng) => void;
+  /** Destaca a CTO selecionada no mini-mapa (opcional). */
+  selectedId?: string | null;
+  /** Posição provisória de uma CTO sendo arrastada no Street View (tempo real). */
+  liveMarker?: { id: string; pos: LatLng } | null;
 };
 
 /** Mini-mapa de orientação exibido sobre o Street View, com seta girando conforme o heading. */
-export function StreetViewMiniMap({ pos, heading, nodes, filter, onMove }: Props) {
+export function StreetViewMiniMap({ pos, heading, nodes, filter, onMove, selectedId, liveMarker }: Props) {
   const div = useRef<HTMLDivElement>(null);
   const map = useRef<any>(null);
   const arrow = useRef<any>(null);
   const shapes = useRef<any[]>([]);
+  const markerById = useRef(new Map<string, any>());
   const moveRef = useRef(onMove);
   moveRef.current = onMove;
   const [open, setOpen] = useState(true);
@@ -48,6 +53,7 @@ export function StreetViewMiniMap({ pos, heading, nodes, filter, onMove }: Props
     const m = map.current;
     shapes.current.forEach((s) => s.setMap(null));
     shapes.current = [];
+    markerById.current.clear();
     if (!g || !m) return;
     for (const n of nodes) {
       if (!isFeature(n)) continue;
@@ -56,9 +62,19 @@ export function StreetViewMiniMap({ pos, heading, nodes, filter, onMove }: Props
       const s = f.style;
       if (f.kind === "polygon") shapes.current.push(new g.maps.Polygon({ map: m, paths: f.coords, clickable: false, strokeColor: s.color, strokeWeight: s.strokeWidth, strokeOpacity: s.strokeOpacity, fillColor: s.fillColor, fillOpacity: s.fillOpacity }));
       else if (f.kind === "path") shapes.current.push(new g.maps.Polyline({ map: m, path: f.coords, clickable: false, strokeColor: s.color, strokeWeight: s.strokeWidth, strokeOpacity: s.strokeOpacity }));
-      else shapes.current.push(new g.maps.Marker({ map: m, position: f.coords[0], clickable: false, icon: { path: "M 0 -6 L 6 5 L -6 5 Z", fillColor: s.color, fillOpacity: 1, strokeColor: "#000000", strokeWeight: 1, scale: 0.9 } }));
+      else {
+        const sel = f.id === selectedId;
+        const marker = new g.maps.Marker({ map: m, position: f.coords[0], clickable: false, zIndex: sel ? 100 : 1, icon: { path: "M 0 -6 L 6 5 L -6 5 Z", fillColor: s.color, fillOpacity: 1, strokeColor: sel ? "#facc15" : "#000000", strokeWeight: sel ? 2 : 1, scale: sel ? 1.4 : 0.9 } });
+        shapes.current.push(marker);
+        markerById.current.set(f.id, marker);
+      }
     }
-  }, [nodes, filter, open]);
+  }, [nodes, filter, open, selectedId]);
+
+  // CTO arrastada no Street View: acompanha em tempo real, sem recriar as formas
+  useEffect(() => {
+    if (liveMarker) markerById.current.get(liveMarker.id)?.setPosition(liveMarker.pos);
+  }, [liveMarker]);
 
   // Posição e direção em tempo real
   useEffect(() => {

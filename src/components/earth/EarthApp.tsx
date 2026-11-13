@@ -123,6 +123,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   const [center3D, setCenter3D] = useState<LatLng>({ lat: -15.78, lng: -47.93 });
   const [sv, setSv] = useState<{ visible: boolean; pos: LatLng | null; heading: number }>({ visible: false, pos: null, heading: 0 });
   const [sv3dOpen, setSv3dOpen] = useState(false);
+  const [svLive, setSvLive] = useState<{ id: string; pos: LatLng } | null>(null);
   const [sv3dPosition, setSv3dPosition] = useState<LatLng | null>(null);
   const [sv3dHeading, setSv3dHeading] = useState(0);
   const [goto, setGoto] = useState("");
@@ -609,6 +610,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               onCenterChange={setCenter3D}
               mode={mode}
               draft={draft}
+              liveMarker={svLive}
               onCreateMarker={(point) => createFeature("marker", [point])}
               onExitMarkerMode={() => { modeRef.current = "none"; setMode("none"); }}
               onDraftPoint={(point) => updateDraft((d) => {
@@ -760,6 +762,11 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
             filter={filter}
             onClose={() => setSv3dOpen(false)}
             onChange={({ pos, heading }) => { setSv3dPosition(pos); setSv3dHeading(heading); }}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onMoveNode={(id, pos) => dispatch({ type: "update", id, patch: { coords: [pos] } })}
+            onLiveMove={setSvLive}
+            onAddMarker={(point) => { createFeature("marker", [point]); toast.success("Marcador adicionado no Street View"); }}
           />
         )}
 
