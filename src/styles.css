@@ -244,3 +244,11 @@ body { font-family: var(--font-sans); }
 .earth-toolbar .earth-tool-icon[data-active="true"] {
   @apply bg-primary text-primary-foreground;
 }
+
+
+/* Alça exclusiva para reposicionar a barra sem interferir nos botões ou no mapa. */
+.earth-toolbar-drag {
+  @apply inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing;
+  touch-action: none;
+  user-select: none;
+}
