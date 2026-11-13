@@ -15,6 +15,7 @@ type Props = {
   onCenterChange?: (center: LatLng) => void;
   mode?: "none" | "marker" | "polygon" | "path" | "ruler";
   onCreateMarker?: (point: LatLng) => void;
+  onExitMarkerMode?: () => void;
   onDraftPoint?: (point: LatLng) => void;
 };
 
@@ -135,6 +136,7 @@ export function Map3DView({
   onCenterChange,
   mode = "none",
   onCreateMarker,
+  onExitMarkerMode,
   onDraftPoint,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -154,16 +156,22 @@ export function Map3DView({
   const onCenterChangeRef = useRef(onCenterChange);
   const modeRef = useRef(mode);
   const onCreateMarkerRef = useRef(onCreateMarker);
+  const onExitMarkerModeRef = useRef(onExitMarkerMode);
+  const markerClickTsRef = useRef(0);
   const onDraftPointRef = useRef(onDraftPoint);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [cameraRange, setCameraRange] = useState(20_000_000);
+  const [moveId, setMoveId] = useState<string | null>(null);
+  const moveIdRef = useRef<string | null>(null);
+  moveIdRef.current = moveId;
 
   onSelectRef.current = onSelect;
   onUpdateRef.current = onUpdate;
   onCenterChangeRef.current = onCenterChange;
   modeRef.current = mode;
   onCreateMarkerRef.current = onCreateMarker;
+  onExitMarkerModeRef.current = onExitMarkerMode;
   onDraftPointRef.current = onDraftPoint;
 
   useEffect(() => {
@@ -240,8 +248,24 @@ export function Map3DView({
           if (!raw) return;
           const point = { lat: Number(raw.lat), lng: Number(raw.lng) };
           if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return;
+          const moving = moveIdRef.current;
+          if (moving) {
+            // Reposiciona a CTO no ponto clicado; a coordenada é gravada pelo mesmo reducer.
+            setMoveId(null);
+            onUpdateRef.current(moving, { coords: [point] });
+            return;
+          }
           const active = modeRef.current;
-          if (active === "marker") onCreateMarkerRef.current?.(point);
+          if (active === "marker") {
+            // Se o clique também atingiu uma CTO existente, seleciona-a em vez de criar outra.
+            // A criação espera um instante para cobrir qualquer ordem entre os dois eventos.
+            const clickedAt = performance.now();
+            if (clickedAt - markerClickTsRef.current < 300) return;
+            window.setTimeout(() => {
+              if (Math.abs(markerClickTsRef.current - clickedAt) < 300) return;
+              if (modeRef.current === "marker") onCreateMarkerRef.current?.(point);
+            }, 100);
+          }
           else if (active === "polygon" || active === "path" || active === "ruler") onDraftPointRef.current?.(point);
         };
         map.addEventListener("gmp-click", handleMapClick);
@@ -297,68 +321,6 @@ export function Map3DView({
       window.removeEventListener("pointercancel", finish, true);
     };
   }, []);
-
-  // Alças de edição dos vértices do polígono selecionado.
-  // O Maps 3D não oferece a propriedade editable nativa; os handles usam
-  // marcadores interativos e gravam a geometria no mesmo reducer compartilhado.
-  useEffect(() => {
-    const map = mapRef.current;
-    const lib = libraryRef.current;
-    const selected = nodes.find((node) => node.id === selectedId && node.kind === "polygon");
-    if (!map || !lib || !selected || mode !== "none") return;
-    const Handle = lib.Marker3DInteractiveElement || lib.Marker3DElement;
-    if (!Handle) return;
-
-    const nextCoords = selected.coords.map((point) => ({ ...point }));
-    const handles: any[] = [];
-    let active: { index: number; pointerId: number; position: LatLng } | null = null;
-
-    const finish = (event: PointerEvent) => {
-      if (!active || active.pointerId !== event.pointerId) return;
-      const edited = nextCoords.map((point, index) => index === active!.index ? active!.position : point);
-      active = null;
-      onUpdateRef.current(selected.id, { coords: edited } as Partial<GeoNode>);
-    };
-
-    nextCoords.forEach((point, index) => {
-      const handle = new Handle();
-      handle.position = { ...point, altitude: 2 };
-      handle.label = "●";
-      handle.title = `Vértice ${index + 1} — arraste para editar`;
-      handle.sizePreserved = true;
-      handle.drawsWhenOccluded = true;
-      handle.zIndex = 20000;
-      handle.style.cursor = "move";
-      handle.addEventListener("pointerdown", (event: PointerEvent) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        active = { index, pointerId: event.pointerId, position: { ...nextCoords[index]! } };
-      });
-      handle.addEventListener("gmp-pointermove", (event: any) => {
-        if (!active || active.index !== index) return;
-        const raw = event?.position ?? event?.detail?.position;
-        if (!raw) return;
-        const position = { lat: Number(raw.lat), lng: Number(raw.lng) };
-        if (!Number.isFinite(position.lat) || !Number.isFinite(position.lng)) return;
-        active.position = position;
-        handle.position = { ...position, altitude: 2 };
-        const live = nextCoords.map((coord, i) => i === index ? position : coord);
-        const polygon = overlaysRef.current.get(selected.id)?.element;
-        if (polygon) polygon.path = live.map((coord) => ({ ...coord, altitude: 0 }));
-      });
-      map.append(handle);
-      handles.push(handle);
-    });
-
-    window.addEventListener("pointerup", finish, true);
-    window.addEventListener("pointercancel", finish, true);
-    return () => {
-      window.removeEventListener("pointerup", finish, true);
-      window.removeEventListener("pointercancel", finish, true);
-      handles.forEach((handle) => handle.remove?.());
-    };
-  }, [nodes, selectedId, mode]);
 
   // Sincroniza somente os objetos que realmente mudaram.
   // Selecionar um item não desmonta centenas de outros marcadores.
@@ -423,6 +385,13 @@ export function Map3DView({
         if (node.kind === "marker" && markerClass) {
           element = new markerClass();
           element.addEventListener?.("gmp-click", () => {
+            if (modeRef.current === "marker") {
+              // Clique sobre CTO existente no modo Marcador: seleciona e volta a Navegar.
+              markerClickTsRef.current = performance.now();
+              onSelectRef.current(node.id);
+              onExitMarkerModeRef.current?.();
+              return;
+            }
             if (modeRef.current !== "none") return;
             if (!dragMarkerRef.current) onSelectRef.current(node.id);
           });
@@ -517,10 +486,8 @@ export function Map3DView({
         // A transparência é aplicada no próprio valor CSS da cor.
         element.path = coords;
         element.strokeColor = toRgba(selected ? "#facc15" : style.color, selected ? 1 : style.strokeOpacity);
-        element.strokeWidth = selected ? Math.max(6, style.strokeWidth + 4) : style.strokeWidth;
-        element.fillColor = selected
-          ? toRgba("#facc15", Math.max(0.35, style.fillOpacity))
-          : toRgba(style.fillColor, style.fillOpacity);
+        element.strokeWidth = selected ? 3 : style.strokeWidth;
+        element.fillColor = toRgba(style.fillColor, style.fillOpacity);
         element.drawsOccludedSegments = true;
         element.geodesic = true;
         element.zIndex = selected ? 10000 : 1;
@@ -544,6 +511,17 @@ export function Map3DView({
       }
     }
   }, [nodes, filter, selectedId, cameraRange]);
+
+  useEffect(() => {
+    if (moveId && (moveId !== selectedId || mode !== "none")) setMoveId(null);
+  }, [moveId, selectedId, mode]);
+
+  useEffect(() => {
+    if (!moveId) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setMoveId(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moveId]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -603,6 +581,8 @@ export function Map3DView({
     });
   };
 
+  const selectedMarker = nodes.find((node) => node.id === selectedId && node.kind === "marker") ?? null;
+
   return (
     <div className="absolute inset-0">
       <div ref={hostRef} className="absolute inset-0" />
@@ -615,6 +595,20 @@ export function Map3DView({
           <LocateFixed className="size-4" />
         </button>
       </div>
+
+      {selectedMarker && mode === "none" && (
+        <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
+          {moveId ? (
+            <button className="rounded-lg border border-yellow-400 bg-card/95 px-3 py-2 text-sm font-medium shadow-lg backdrop-blur" onClick={() => setMoveId(null)}>
+              Clique no mapa para posicionar a CTO · Cancelar (Esc)
+            </button>
+          ) : (
+            <button className="rounded-lg border border-border bg-card/90 px-3 py-2 text-sm shadow-lg backdrop-blur hover:border-yellow-400" onClick={() => setMoveId(selectedMarker.id)}>
+              Mover CTO selecionada
+            </button>
+          )}
+        </div>
+      )}
 
       {status === "loading" && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 text-sm text-foreground backdrop-blur-sm">

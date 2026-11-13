@@ -415,6 +415,9 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         ov.__kind = n.kind;
         ov.addListener("click", (e: any) => {
           setSelectedId(n.id);
+          // Em modo Marcador, clicar numa CTO existente a seleciona (e volta a Navegar)
+          // em vez de criar outra por cima.
+          if (n.kind === "marker" && modeRef.current === "marker") { modeRef.current = "none"; setMode("none"); }
           const cur = nodesRef.current.find((x) => x.id === n.id);
           if (!cur) return;
           const box = document.createElement("div");
@@ -462,7 +465,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         ov.setOptions({
           title: n.name,
           draggable: sel && interactive,
-          clickable: interactive,
+          clickable: interactive || mode === "marker",
           zIndex: sel ? 1000 : 1,
           icon: iconOpt,
           label: n.name && showLabel ? { text: n.name, color: "#ffffff", fontSize: `${Math.max(9, Math.round(13 * s.scale))}px`, fontWeight: "500", className: "earth-marker-label" } : null,
@@ -606,6 +609,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               onCenterChange={setCenter3D}
               mode={mode}
               onCreateMarker={(point) => createFeature("marker", [point])}
+              onExitMarkerMode={() => { modeRef.current = "none"; setMode("none"); }}
               onDraftPoint={(point) => updateDraft((d) => {
                 const last = d.at(-1);
                 return last && last.lat === point.lat && last.lng === point.lng ? d : [...d, point];
