@@ -26,6 +26,16 @@ type OverlayRecord = {
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
+/** Quantos marcadores alternados manter conforme a distância da câmera (metros). */
+const markerStrideFromRange = (range: number) => {
+  if (range < 2_500) return 1;       // visão próxima: todos
+  if (range < 8_000) return 2;       // aproximação: 1 a cada 2
+  if (range < 20_000) return 4;      // bairro: 1 a cada 4
+  if (range < 60_000) return 8;      // cidade: 1 a cada 8
+  if (range < 150_000) return 16;   // regional: 1 a cada 16
+  return 32;                        // visão muito distante: 1 a cada 32
+};
+
 /** Converte o zoom 2D em distância de câmera 3D (metros). */
 const rangeFromZoom = (zoom: number) =>
   zoom <= 4 ? 20_000_000 : clamp(180 * 2 ** (18 - zoom), 350, 18_000_000);
@@ -101,6 +111,7 @@ export function Map3DView({
   const onDraftPointRef = useRef(onDraftPoint);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
+  const [cameraRange, setCameraRange] = useState(20_000_000);
 
   onSelectRef.current = onSelect;
   onUpdateRef.current = onUpdate;
@@ -170,6 +181,14 @@ export function Map3DView({
         };
         map.addEventListener("gmp-centerchange", syncCenter);
         centerListenerRef.current = syncCenter;
+        const syncRange = () => {
+          const nextRange = Number(map.range);
+          if (Number.isFinite(nextRange) && nextRange > 0) {
+            setCameraRange((previous) => previous === nextRange ? previous : nextRange);
+          }
+        };
+        map.addEventListener("gmp-rangechange", syncRange);
+        (map as any).__terraSyncRange = syncRange;
         const handleMapClick = (event: any) => {
           const raw = event?.position ?? event?.detail?.position ?? event?.latLngAltitude ?? event?.detail?.latLngAltitude;
           if (!raw) return;
@@ -203,6 +222,7 @@ export function Map3DView({
       map?.removeEventListener?.("gmp-map-id-error", handleMapIdError);
       if ((map as any)?.__terraHandleMapClick) map.removeEventListener?.("gmp-click", (map as any).__terraHandleMapClick);
       if (centerListenerRef.current) map?.removeEventListener?.("gmp-centerchange", centerListenerRef.current);
+      if ((map as any)?.__terraSyncRange) map.removeEventListener?.("gmp-rangechange", (map as any).__terraSyncRange);
       centerListenerRef.current = null;
       mapRef.current = null;
       libraryRef.current = null;
@@ -302,6 +322,8 @@ export function Map3DView({
     const lineClass = lib.Polyline3DInteractiveElement || lib.Polyline3DElement;
     const liveIds = new Set<string>();
     const nodesById = new Map(nodes.map((node) => [node.id, node]));
+    const markerStride = markerStrideFromRange(cameraRange);
+    let markerIndex = 0;
 
     const isVisible = (node: Extract<GeoNode, { kind: "marker" | "polygon" | "path" }>) => {
       if (!node.visible || !passesFilter(node, filter)) return false;
@@ -319,8 +341,18 @@ export function Map3DView({
 
       liveIds.add(node.id);
       const selected = node.id === selectedId;
-      const signature = geometrySignature(node, selected);
       const existing = overlaysRef.current.get(node.id);
+      let markerVisible = true;
+      if (node.kind === "marker") {
+        markerVisible = selected || markerIndex % markerStride === 0;
+        markerIndex += 1;
+        // Não desmonta o marcador: apenas alterna a apresentação, mantendo
+        // seleção, arraste geográfico e identidade do elemento intactos.
+        if (existing?.kind === "marker") {
+          existing.element.style.display = markerVisible ? "" : "none";
+        }
+      }
+      const signature = geometrySignature(node, selected);
 
       if (existing && existing.kind === node.kind && existing.signature === signature) {
         continue;
@@ -396,6 +428,7 @@ export function Map3DView({
         element.zIndex = selected ? 10000 : 1;
         element.style.filter = selected ? "drop-shadow(0 0 5px #facc15) drop-shadow(0 0 2px #facc15)" : "none";
         element.style.cursor = "grab";
+        element.style.display = markerVisible ? "" : "none";
       } else if (node.kind === "polygon") {
         // Polygon3D não oferece fillOpacity/strokeOpacity.
         // A transparência é aplicada no próprio valor CSS da cor.
@@ -425,7 +458,14 @@ export function Map3DView({
         overlaysRef.current.delete(id);
       }
     }
-  }, [nodes, filter, selectedId]);
+  }, [nodes, filter, selectedId, cameraRange]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const currentRange = Number(map.range);
+    if (Number.isFinite(currentRange) && currentRange > 0) setCameraRange(currentRange);
+  }, [status]);
 
   useEffect(() => {
     if (!focusRequest || !mapRef.current) return;
