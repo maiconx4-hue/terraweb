@@ -104,7 +104,13 @@ export function Map3DView({
   const centerListenerRef = useRef<(() => void) | null>(null);
   const onSelectRef = useRef(onSelect);
   const onUpdateRef = useRef(onUpdate);
-  const dragMarkerRef = useRef<{ id: string; element: any; pointerId: number; position: LatLng } | null>(null);
+  const dragMarkerRef = useRef<{
+    id: string;
+    element: any;
+    pointerId: number;
+    position: LatLng;
+    previousGestureHandling: any;
+  } | null>(null);
   const onCenterChangeRef = useRef(onCenterChange);
   const modeRef = useRef(mode);
   const onCreateMarkerRef = useRef(onCreateMarker);
@@ -121,6 +127,19 @@ export function Map3DView({
   onDraftPointRef.current = onDraftPoint;
 
   useEffect(() => {
+    const styleId = "terra-cto-selection-pulse";
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = `
+        @keyframes terra-cto-selection-pulse {
+          0%, 100% { filter: drop-shadow(0 0 2px #facc15) drop-shadow(0 0 1px #facc15); }
+          50% { filter: drop-shadow(0 0 11px #facc15) drop-shadow(0 0 6px #22d3ee); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
     let cancelled = false;
     let map: any;
 
@@ -238,6 +257,10 @@ export function Map3DView({
       const drag = dragMarkerRef.current;
       if (!drag || drag.pointerId !== event.pointerId) return;
       dragMarkerRef.current = null;
+      const activeMap = mapRef.current;
+      if (activeMap && drag.previousGestureHandling != null) {
+        activeMap.gestureHandling = drag.previousGestureHandling;
+      }
       onUpdateRef.current(drag.id, { coords: [drag.position] });
     };
     window.addEventListener("pointerup", finish, true);
@@ -378,14 +401,30 @@ export function Map3DView({
           });
           // O evento gmp-pointermove fornece a coordenada geográfica real sob o cursor.
           element.addEventListener?.("pointerdown", (event: PointerEvent) => {
-            if (event.button !== 0) return;
+            if (event.button !== 0 || modeRef.current !== "none") return;
             event.preventDefault();
             event.stopPropagation();
             onSelectRef.current(node.id);
+
             const current = element.position;
             if (!current) return;
+
+            const activeMap = mapRef.current;
+            const previousGestureHandling = activeMap?.gestureHandling;
+            // Durante o arraste, reduzimos a captura de gestos da câmera.
+            // O ponteiro também fica capturado pelo marcador até o pointerup.
+            if (activeMap) activeMap.gestureHandling = "COOPERATIVE";
+            try {
+              element.setPointerCapture?.(event.pointerId);
+            } catch {
+              // Alguns builds do elemento 3D não expõem Pointer Capture.
+            }
+
             dragMarkerRef.current = {
-              id: node.id, element, pointerId: event.pointerId,
+              id: node.id,
+              element,
+              pointerId: event.pointerId,
+              previousGestureHandling,
               position: { lat: Number(current.lat), lng: Number(current.lng) },
             };
           });
@@ -444,10 +483,10 @@ export function Map3DView({
         // Destaque persistente do CTO selecionado: halo amarelo/ciano,
         // leve ampliação e prioridade de renderização acima dos demais.
         element.sizePreserved = true;
-        element.style.filter = selected
-          ? "drop-shadow(0 0 7px #facc15) drop-shadow(0 0 3px #22d3ee)"
+        element.style.animation = selected
+          ? "terra-cto-selection-pulse 1.15s ease-in-out infinite"
           : "none";
-        element.style.transform = selected ? "scale(1.45)" : "scale(1)";
+        element.style.transform = selected ? "scale(1.3)" : "scale(1)";
         element.style.transformOrigin = "center center";
         element.style.cursor = selected ? "grab" : "pointer";
         element.style.display = markerVisible ? "" : "none";
