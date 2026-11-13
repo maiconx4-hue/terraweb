@@ -67,8 +67,7 @@ const geometrySignature = (node: Extract<GeoNode, { kind: "marker" | "polygon" |
  * Visualizador 3D do Terra Web.
  *
  * Mantém uma única instância do Map3DElement e atualiza os overlays por ID.
- * A orientação é travada no norte (heading 0); a inclinação e o zoom continuam
- * livres para permitir navegação orbital sem rotação lateral do mapa.
+ * A câmera permite rotação horizontal livre; o botão de bússola retorna ao norte.
  */
 export function Map3DView({
   nodes,
@@ -130,8 +129,6 @@ export function Map3DView({
           tilt: initialZoom >= 14 ? 62 : 35,
           heading: 0,
           roll: 0,
-          minHeading: 0,
-          maxHeading: 0,
           minTilt: 0,
           maxTilt: 85,
           mode: "HYBRID",
@@ -306,8 +303,8 @@ export function Map3DView({
         center: { ...focusRequest.center, altitude: 0 },
         range: 900,
         tilt: 65,
-        heading: 0,
-        roll: 0,
+        heading: Number.isFinite(map.heading) ? map.heading : 0,
+        roll: Number.isFinite(map.roll) ? map.roll : 0,
       },
       durationMillis: 1800,
     });
@@ -352,7 +349,7 @@ export function Map3DView({
       <div ref={hostRef} className="absolute inset-0" />
 
       <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-border bg-card/90 p-1 shadow-lg backdrop-blur">
-        <button className="earth-icon-btn" title="Norte fixo" onClick={resetNorth}>
+        <button className="earth-icon-btn" title="Alinhar câmera ao norte" aria-label="Alinhar câmera ao norte" onClick={resetNorth}>
           <Compass className="size-4" />
         </button>
         <button className="earth-icon-btn" title="Voltar à visão inicial" onClick={resetView}>
