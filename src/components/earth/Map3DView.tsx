@@ -15,6 +15,8 @@ type Props = {
   onCenterChange?: (center: LatLng) => void;
   mode?: "none" | "marker" | "polygon" | "path" | "ruler";
   draft?: LatLng[];
+  /** "satellite" = só imagem; qualquer outro valor = satélite + rótulos. */
+  mapType?: string;
   /** CTO sendo arrastada no Street View: move o marcador 3D em tempo real. */
   liveMarker?: { id: string; pos: LatLng } | null;
   onCreateMarker?: (point: LatLng) => void;
@@ -172,6 +174,7 @@ export function Map3DView({
   onCenterChange,
   mode = "none",
   draft,
+  mapType,
   liveMarker,
   onCreateMarker,
   onExitMarkerMode,
@@ -435,6 +438,12 @@ export function Map3DView({
     return () => created.forEach((element) => element.remove?.());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editCoordsKey, editVertex, status, editId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || status !== "ready") return;
+    map.mode = mapType === "satellite" ? "SATELLITE" : "HYBRID";
+  }, [mapType, status]);
 
   // Rascunho durante a criação (polígono, caminho, régua): linha/área amarela e
   // vértices brancos, como no mapa 2D. Usa elementos não interativos para que os
@@ -784,7 +793,7 @@ export function Map3DView({
       </div>
 
       {selectedMarker && mode === "none" && (
-        <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
+        <div className="absolute bottom-6 left-1/2 z-20 max-w-[92%] -translate-x-1/2">
           {moveId ? (
             <button className="rounded-lg border border-yellow-400 bg-card/95 px-3 py-2 text-sm font-medium shadow-lg backdrop-blur" onClick={() => setMoveId(null)}>
               Clique no mapa para posicionar a CTO · Cancelar (Esc)
@@ -798,7 +807,7 @@ export function Map3DView({
       )}
 
       {!editId && selectedShape && mode === "none" && (
-        <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
+        <div className="absolute bottom-6 left-1/2 z-20 max-w-[92%] -translate-x-1/2">
           <button className="rounded-lg border border-border bg-card/90 px-3 py-2 text-sm shadow-lg backdrop-blur hover:border-yellow-400" onClick={() => { setMoveId(null); setEditId(selectedShape.id); setEditVertex(null); }}>
             Editar vértices
           </button>
@@ -806,7 +815,7 @@ export function Map3DView({
       )}
 
       {editShape && mode === "none" && (
-        <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-lg border border-yellow-400 bg-card/95 px-3 py-2 text-sm shadow-lg backdrop-blur">
+        <div className="absolute bottom-6 left-1/2 z-20 flex max-w-[92%] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-lg border border-yellow-400 bg-card/95 px-3 py-2 text-sm shadow-lg backdrop-blur">
           <span>
             {insertArm ? "Clique no mapa para inserir o ponto" : editVertex === null ? "Clique em um vértice para selecioná-lo" : "Clique no mapa para mover o vértice"}
           </span>

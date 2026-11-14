@@ -610,6 +610,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               onCenterChange={setCenter3D}
               mode={mode}
               draft={draft}
+              mapType={mapType}
               liveMarker={svLive}
               onCreateMarker={(point) => createFeature("marker", [point])}
               onExitMarkerMode={() => { modeRef.current = "none"; setMode("none"); }}
@@ -700,14 +701,16 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
               </button>
             ))}
           </div>
-          {viewMode === "2d" && (
-            <select value={mapType} onChange={(e) => setMapType(e.target.value)} className="earth-input w-36">
-              <option value="hybrid">Satélite + rótulos</option>
-              <option value="satellite">Satélite</option>
-              <option value="terrain">Relevo</option>
-              <option value="roadmap">Mapa</option>
-            </select>
-          )}
+          <select
+            value={viewMode === "3d" && mapType !== "satellite" ? "hybrid" : mapType}
+            onChange={(e) => setMapType(e.target.value)}
+            className="earth-input w-36"
+          >
+            <option value="hybrid">Satélite + rótulos</option>
+            <option value="satellite">Satélite</option>
+            {viewMode === "2d" && <option value="terrain">Relevo</option>}
+            {viewMode === "2d" && <option value="roadmap">Mapa</option>}
+          </select>
           <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); onGoto(); }}>
             <input value={goto} onChange={(e) => setGoto(e.target.value)} placeholder="-23.5505, -46.6333" className="earth-input w-48 font-mono" />
             <button className="earth-btn">Ir</button>
