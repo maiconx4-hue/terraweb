@@ -40,6 +40,8 @@ const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(ma
 const FOV_DEG = 35;                      // campo de visão vertical aproximado do Maps 3D
 const LABEL_MAX_ALTITUDE = 40_000;       // acima disso nenhum título é mostrado
 const LABEL_HEIGHT_PX = 14;
+const ALWAYS_LABELS_ALTITUDE = 500;      // abaixo disso os títulos nunca somem, nem em movimento
+const MOVING_SETTLE_MS = 250;            // tempo parado para os títulos reaparecerem
 const ALL_LABELS_ALTITUDE = 4_000;       // até aqui todos os títulos aparecem (como o Earth a ~3,3 km)
 const LABEL_OVERLAP_TOLERANCE = 0.6;     // como no Earth, títulos podem se tocar um pouco
 
@@ -357,6 +359,8 @@ export function Map3DView({
   const [cameraTilt, setCameraTilt] = useState(62);
   const [cameraHeading, setCameraHeading] = useState(0);
   const altitudeRef = useRef<HTMLDivElement>(null);
+  const [cameraMoving, setCameraMoving] = useState(false);
+  const movingTimerRef = useRef<number | null>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
   const moveIdRef = useRef<string | null>(null);
   moveIdRef.current = moveId;
@@ -437,7 +441,17 @@ export function Map3DView({
         map.addEventListener("gmp-error", handleMapError);
         map.addEventListener("gmp-map-id-error", handleMapIdError);
 
+        // Em movimento (arrastar, zoom, girar): os títulos somem e voltam quando a câmera para.
+        const markMoving = () => {
+          setCameraMoving((previous) => (previous ? previous : true));
+          if (movingTimerRef.current !== null) window.clearTimeout(movingTimerRef.current);
+          movingTimerRef.current = window.setTimeout(() => {
+            movingTimerRef.current = null;
+            setCameraMoving(false);
+          }, MOVING_SETTLE_MS);
+        };
         const syncCenter = () => {
+          markMoving();
           const center = map.center;
           if (center && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
             onCenterChangeRef.current?.({ lat: center.lat, lng: center.lng });
@@ -465,10 +479,12 @@ export function Map3DView({
             altitudeRef.current.textContent = `Altitude do ponto de visão ${formatAltitude(altitude)}`;
           }
         };
-        map.addEventListener("gmp-rangechange", syncRange);
-        map.addEventListener("gmp-tiltchange", syncRange);
-        map.addEventListener("gmp-headingchange", syncRange);
-        (map as any).__terraSyncRange = syncRange;
+        const onCameraEvent = () => { markMoving(); syncRange(); };
+        map.addEventListener("gmp-rangechange", onCameraEvent);
+        map.addEventListener("gmp-tiltchange", onCameraEvent);
+        map.addEventListener("gmp-headingchange", onCameraEvent);
+        (map as any).__terraSyncRange = onCameraEvent;
+        (map as any).__terraReadView = syncRange;
         const handleMapClick = (event: any) => {
           const raw = event?.position ?? event?.detail?.position ?? event?.latLngAltitude ?? event?.detail?.latLngAltitude;
           if (!raw) return;
@@ -547,6 +563,7 @@ export function Map3DView({
         map.removeEventListener?.("gmp-headingchange", (map as any).__terraSyncRange);
       }
       centerListenerRef.current = null;
+      if (movingTimerRef.current !== null) window.clearTimeout(movingTimerRef.current);
       mapRef.current = null;
       libraryRef.current = null;
       hostRef.current?.replaceChildren();
@@ -707,7 +724,8 @@ export function Map3DView({
 
     // Títulos: lado alternado e sem colisão (só abaixo da altitude limite).
     let labelPlan = new Map<string, "l" | "r" | null>();
-    if (altitude < LABEL_MAX_ALTITUDE) {
+    const hideWhileMoving = cameraMoving && altitude > ALWAYS_LABELS_ALTITUDE;
+    if (altitude < LABEL_MAX_ALTITUDE && !hideWhileMoving) {
       const items: LabelItem[] = [];
       let planIndex = 0;
       for (const node of nodes) {
@@ -854,7 +872,9 @@ export function Map3DView({
         element.position = coords[0];
         element.title = node.name || "Marcador";
         element.drawsWhenOccluded = true;
-        element.collisionBehavior = "OPTIONAL_AND_HIDES_LOWER_PRIORITY";
+        // REQUIRED: o Google não esconde CTOs por colisão (a largura do SVG inclui o título e fazia
+        // marcadores vizinhos sumirem). A limpeza de títulos é feita por planLabels.
+        element.collisionBehavior = "REQUIRED";
         // Marcadores sempre acima de polígonos e caminhos (máx. 10000), inclusive do selecionado,
         // para que o clique sobre a CTO não seja capturado pela área do polígono.
         element.zIndex = selected ? 15000 : 12000;
@@ -893,7 +913,7 @@ export function Map3DView({
         overlaysRef.current.delete(id);
       }
     }
-  }, [nodes, filter, selectedId, cameraRange, cameraTilt, cameraHeading]);
+  }, [nodes, filter, selectedId, cameraRange, cameraTilt, cameraHeading, cameraMoving]);
 
   useEffect(() => {
     if (moveId && (moveId !== selectedId || mode !== "none")) setMoveId(null);
@@ -922,7 +942,7 @@ export function Map3DView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    (map as any).__terraSyncRange?.();
+    (map as any).__terraReadView?.();
   }, [status]);
 
   useEffect(() => {
