@@ -32,15 +32,52 @@ type OverlayRecord = {
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
-/** Quantos marcadores alternados manter conforme a distância da câmera (metros). */
-const markerStrideFromRange = (range: number) => {
-  if (range < 2_500) return 1;       // visão próxima: todos
-  if (range < 8_000) return 2;       // aproximação: 1 a cada 2
-  if (range < 20_000) return 4;      // bairro: 1 a cada 4
-  if (range < 60_000) return 8;      // cidade: 1 a cada 8
-  if (range < 150_000) return 16;   // regional: 1 a cada 16
-  return 32;                        // visão muito distante: 1 a cada 32
+/*
+ * Progressão como no Google Earth Pro. Tudo é medido pela ALTITUDE DO PONTO DE VISÃO
+ * (a mesma que o Earth mostra no rodapé): distância da câmera × cos(inclinação).
+ * Ajuste os limites abaixo para calibrar com o Earth.
+ */
+const FOV_DEG = 35;                      // campo de visão vertical aproximado do Maps 3D
+const LABEL_MAX_ALTITUDE = 40_000;       // acima disso nenhum título é mostrado
+const LABEL_HEIGHT_PX = 14;
+const ALL_LABELS_ALTITUDE = 4_000;       // até aqui todos os títulos aparecem (como o Earth a ~3,3 km)
+const LABEL_OVERLAP_TOLERANCE = 0.6;     // como no Earth, títulos podem se tocar um pouco
+
+/** Quantos ícones manter: todos até bem longe (o Earth só tira os títulos primeiro). */
+const markerStrideFromAltitude = (altitude: number) => {
+  if (altitude < 20_000) return 1;
+  if (altitude < 50_000) return 2;
+  if (altitude < 120_000) return 4;
+  if (altitude < 300_000) return 16;
+  return 64;
 };
+
+/** Ícones menores conforme o afastamento (degraus, para não recriar o SVG a cada pixel). */
+const iconScaleFromAltitude = (altitude: number) => {
+  if (altitude <= 3_500) return 1;
+  if (altitude <= 10_000) return 0.85;
+  if (altitude <= 25_000) return 0.7;
+  if (altitude <= 60_000) return 0.55;
+  return 0.45;
+};
+
+const iconPx = (style: FeatureStyle, selected: boolean, zf: number) =>
+  Math.max(10, Math.round(26 * style.scale * (selected ? 1.6 : zf)));
+
+/** Quantiza a distância da câmera (4 degraus por dobra) para evitar recalcular a cada frame. */
+const quantizeRange = (range: number) => 2 ** (Math.round(Math.log2(range) * 4) / 4);
+const readCameraView = (map: any) => {
+  const range = Number(map.range);
+  const tilt = Number(map.tilt);
+  const heading = Number(map.heading);
+  return {
+    range: Number.isFinite(range) && range > 0 ? range : null,
+    tilt: Number.isFinite(tilt) ? tilt : null,
+    heading: Number.isFinite(heading) ? ((heading % 360) + 360) % 360 : null,
+  };
+};
+const formatAltitude = (meters: number) =>
+  meters >= 1000 ? `${(meters / 1000).toFixed(2).replace(".", ",")} km` : `${Math.round(meters)} m`;
 
 /** Converte o zoom 2D em distância de câmera 3D (metros). */
 const rangeFromZoom = (zoom: number) =>
@@ -89,8 +126,8 @@ const MARKER_ICON_PATHS: Record<string, string> = {
  * Replica o ícone do mapa 2D: selecionado = contorno ciano (ou moldura amarela
  * no triângulo) e tamanho maior (2D usa 1.6x).
  */
-const buildIconSvg = (style: FeatureStyle, selected: boolean) => {
-  const px = Math.max(16, Math.round(26 * style.scale * (selected ? 1.6 : 1)));
+const buildIconSvg = (style: FeatureStyle, selected: boolean, zf: number) => {
+  const px = iconPx(style, selected, zf);
   const color = style.color || "#c60000";
   if (style.icon === "triangle") {
     const frame = selected
@@ -120,24 +157,111 @@ const escapeXml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&
  * Maps 3D é grande demais). Título pequeno à direita do ícone, como no Google Earth Pro;
  * o ícone fica centralizado no SVG para que continue exatamente sobre a coordenada.
  */
-const buildMarkerSvg = (style: FeatureStyle, selected: boolean, name: string) => {
-  const px = Math.max(16, Math.round(26 * style.scale * (selected ? 1.6 : 1)));
-  const icon = buildIconSvg(style, selected);
+const buildMarkerSvg = (style: FeatureStyle, selected: boolean, name: string, side: "l" | "r" | null, zf: number) => {
+  const px = iconPx(style, selected, zf);
+  const icon = buildIconSvg(style, selected, zf);
   const text = name.trim();
-  if (!text) return icon;
+  if (!text || !side) return icon;
   const textWidth = Math.ceil(measureLabel(text, selected));
   const half = Math.ceil(px / 2 + 5 + textWidth + 3);
   const width = half * 2;
   const nested = icon.replace('<svg xmlns="http://www.w3.org/2000/svg"', `<svg x="${half - px / 2}" y="0"`);
-  const label = `<text x="${half + px / 2 + 5}" y="${px / 2}" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="${selected ? 600 : 400}" fill="#ffffff" stroke="#000000" stroke-opacity="0.85" stroke-width="3" stroke-linejoin="round" paint-order="stroke">${escapeXml(text)}</text>`;
+  const x = side === "r" ? half + px / 2 + 5 : half - px / 2 - 5;
+  const anchor = side === "r" ? "start" : "end";
+  const label = `<text x="${x}" y="${px / 2}" text-anchor="${anchor}" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="${selected ? 600 : 400}" fill="#ffffff" stroke="#000000" stroke-opacity="0.85" stroke-width="3" stroke-linejoin="round" paint-order="stroke">${escapeXml(text)}</text>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${px}" viewBox="0 0 ${width} ${px}">${nested}${label}</svg>`;
 };
 
+type LabelItem = { id: string; lat: number; lng: number; name: string; selected: boolean; px: number };
+
+/**
+ * Escolhe o lado do título (esquerda/direita, alternando) e esconde os que colidiriam.
+ * O Maps 3D não informa a posição dos pontos na tela; por isso a tela é estimada a partir
+ * da câmera (altura, inclinação, direção e campo de visão). Aproximação: melhor em visão
+ * mais vertical, menos exata com muita inclinação.
+ */
+const planLabels = (items: LabelItem[], view: { range: number; tilt: number; heading: number; height: number; showAll: boolean }) => {
+  const plan = new Map<string, "l" | "r" | null>();
+  if (items.length === 0 || view.height <= 0) return plan;
+  const mpp = (2 * view.range * Math.tan((FOV_DEG / 2) * (Math.PI / 180))) / view.height;
+  const cosTilt = Math.max(0.25, Math.cos((view.tilt * Math.PI) / 180));
+  const sinH = Math.sin((view.heading * Math.PI) / 180);
+  const cosH = Math.cos((view.heading * Math.PI) / 180);
+  const lat0 = items[0]!.lat;
+  const lng0 = items[0]!.lng;
+  const kx = 111_320 * Math.cos((lat0 * Math.PI) / 180);
+
+  const CELL = 64;
+  const grid = new Map<string, number[]>();
+  const rects: number[][] = [];
+  const cellsOf = (r: number[]) => {
+    const out: string[] = [];
+    for (let cx = Math.floor(r[0]! / CELL); cx <= Math.floor(r[2]! / CELL); cx++)
+      for (let cy = Math.floor(r[1]! / CELL); cy <= Math.floor(r[3]! / CELL); cy++) out.push(`${cx},${cy}`);
+    return out;
+  };
+  const collides = (r: number[]) => {
+    for (const key of cellsOf(r)) {
+      for (const index of grid.get(key) ?? []) {
+        const o = rects[index]!;
+        if (r[0]! < o[2]! && r[2]! > o[0]! && r[1]! < o[3]! && r[3]! > o[1]!) return true;
+      }
+    }
+    return false;
+  };
+  const place = (r: number[]) => {
+    rects.push(r);
+    for (const key of cellsOf(r)) {
+      const list = grid.get(key);
+      if (list) list.push(rects.length - 1);
+      else grid.set(key, [rects.length - 1]);
+    }
+  };
+
+  const screen = (item: LabelItem) => {
+    const east = (item.lng - lng0) * kx;
+    const north = (item.lat - lat0) * 110_574;
+    return {
+      x: (east * cosH - north * sinH) / mpp,
+      y: -((east * sinH + north * cosH) * cosTilt) / mpp,
+    };
+  };
+  const tryPlace = (item: LabelItem, side: "l" | "r", force = false) => {
+    const { x, y } = screen(item);
+    const width = measureLabel(item.name, item.selected) + 6;
+    const edge = item.px / 2 + 3;
+    const x0 = side === "r" ? x + edge : x - edge - width;
+    // O retângulo de colisão é menor que o título: tolera sobreposição leve.
+    const w = width * LABEL_OVERLAP_TOLERANCE;
+    const h = LABEL_HEIGHT_PX * LABEL_OVERLAP_TOLERANCE;
+    const rect = side === "r"
+      ? [x0, y - h / 2, x0 + w, y + h / 2]
+      : [x0 + width - w, y - h / 2, x0 + width, y + h / 2];
+    if (!force && collides(rect)) return false;
+    place(rect);
+    return true;
+  };
+
+  // O selecionado sempre mostra o título; depois os demais, alternando o lado preferido.
+  for (const item of items) if (item.selected) { tryPlace(item, "r", true); plan.set(item.id, "r"); }
+  let flip = false;
+  for (const item of items) {
+    if (item.selected) continue;
+    if (!item.name.trim()) { plan.set(item.id, null); continue; }
+    const order: Array<"l" | "r"> = flip ? ["l", "r"] : ["r", "l"];
+    // Perto: todos os títulos aparecem (lado alternado). Longe: some o que colidir.
+    const side = order.find((candidate) => tryPlace(item, candidate)) ?? (view.showAll ? (tryPlace(item, order[0]!, true), order[0]!) : null);
+    plan.set(item.id, side);
+    if (side) flip = !flip;
+  }
+  return plan;
+};
+
 /** Substitui o conteúdo visual do marcador 3D (sem criar elementos duplicados). */
-const applyMarkerContent = (element: any, style: FeatureStyle, selected: boolean, name: string) => {
+const applyMarkerContent = (element: any, style: FeatureStyle, selected: boolean, name: string, side: "l" | "r" | null, zf: number) => {
   element.querySelectorAll?.("template").forEach((t: Element) => t.remove());
   const template = document.createElement("template");
-  template.innerHTML = buildMarkerSvg(style, selected, name);
+  template.innerHTML = buildMarkerSvg(style, selected, name, side, zf);
   element.append(template);
 };
 
@@ -230,6 +354,9 @@ export function Map3DView({
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [cameraRange, setCameraRange] = useState(20_000_000);
+  const [cameraTilt, setCameraTilt] = useState(62);
+  const [cameraHeading, setCameraHeading] = useState(0);
+  const altitudeRef = useRef<HTMLDivElement>(null);
   const [moveId, setMoveId] = useState<string | null>(null);
   const moveIdRef = useRef<string | null>(null);
   moveIdRef.current = moveId;
@@ -319,12 +446,28 @@ export function Map3DView({
         map.addEventListener("gmp-centerchange", syncCenter);
         centerListenerRef.current = syncCenter;
         const syncRange = () => {
-          const nextRange = Number(map.range);
-          if (Number.isFinite(nextRange) && nextRange > 0) {
-            setCameraRange((previous) => previous === nextRange ? previous : nextRange);
+          const view = readCameraView(map);
+          if (view.range !== null) {
+            const next = quantizeRange(view.range);
+            setCameraRange((previous) => (previous === next ? previous : next));
+          }
+          if (view.tilt !== null) {
+            const next = Math.round(view.tilt / 5) * 5;
+            setCameraTilt((previous) => (previous === next ? previous : next));
+          }
+          if (view.heading !== null) {
+            const next = (Math.round(view.heading / 15) * 15) % 360;
+            setCameraHeading((previous) => (previous === next ? previous : next));
+          }
+          // Altitude do ponto de visão (como o rodapé do Earth Pro), sem re-render.
+          if (altitudeRef.current && view.range !== null) {
+            const altitude = view.range * Math.cos(((view.tilt ?? 0) * Math.PI) / 180);
+            altitudeRef.current.textContent = `Altitude do ponto de visão ${formatAltitude(altitude)}`;
           }
         };
         map.addEventListener("gmp-rangechange", syncRange);
+        map.addEventListener("gmp-tiltchange", syncRange);
+        map.addEventListener("gmp-headingchange", syncRange);
         (map as any).__terraSyncRange = syncRange;
         const handleMapClick = (event: any) => {
           const raw = event?.position ?? event?.detail?.position ?? event?.latLngAltitude ?? event?.detail?.latLngAltitude;
@@ -398,7 +541,11 @@ export function Map3DView({
       map?.removeEventListener?.("gmp-map-id-error", handleMapIdError);
       if ((map as any)?.__terraHandleMapClick) map.removeEventListener?.("gmp-click", (map as any).__terraHandleMapClick);
       if (centerListenerRef.current) map?.removeEventListener?.("gmp-centerchange", centerListenerRef.current);
-      if ((map as any)?.__terraSyncRange) map.removeEventListener?.("gmp-rangechange", (map as any).__terraSyncRange);
+      if ((map as any)?.__terraSyncRange) {
+        map.removeEventListener?.("gmp-rangechange", (map as any).__terraSyncRange);
+        map.removeEventListener?.("gmp-tiltchange", (map as any).__terraSyncRange);
+        map.removeEventListener?.("gmp-headingchange", (map as any).__terraSyncRange);
+      }
       centerListenerRef.current = null;
       mapRef.current = null;
       libraryRef.current = null;
@@ -543,7 +690,9 @@ export function Map3DView({
     const lineClass = lib.Polyline3DInteractiveElement || lib.Polyline3DElement;
     const liveIds = new Set<string>();
     const nodesById = new Map(nodes.map((node) => [node.id, node]));
-    const markerStride = markerStrideFromRange(cameraRange);
+    const altitude = cameraRange * Math.cos((cameraTilt * Math.PI) / 180);
+    const markerStride = markerStrideFromAltitude(altitude);
+    const iconZoomFactor = iconScaleFromAltitude(altitude);
     let markerIndex = 0;
 
     const isVisible = (node: Extract<GeoNode, { kind: "marker" | "polygon" | "path" }>) => {
@@ -555,6 +704,29 @@ export function Map3DView({
       }
       return true;
     };
+
+    // Títulos: lado alternado e sem colisão (só abaixo da altitude limite).
+    let labelPlan = new Map<string, "l" | "r" | null>();
+    if (altitude < LABEL_MAX_ALTITUDE) {
+      const items: LabelItem[] = [];
+      let planIndex = 0;
+      for (const node of nodes) {
+        if (!isFeature(node) || node.kind !== "marker" || !isVisible(node)) continue;
+        const isSelected = node.id === selectedId;
+        const shown = isSelected || planIndex % markerStride === 0;
+        planIndex += 1;
+        const point = node.coords[0];
+        if (!shown || !point || !node.name?.trim()) continue;
+        items.push({ id: node.id, lat: point.lat, lng: point.lng, name: node.name, selected: isSelected, px: iconPx(node.style, isSelected, iconZoomFactor) });
+      }
+      labelPlan = planLabels(items, {
+        range: cameraRange,
+        tilt: cameraTilt,
+        heading: cameraHeading,
+        height: hostRef.current?.clientHeight ?? 0,
+        showAll: altitude <= ALL_LABELS_ALTITUDE,
+      });
+    }
 
     for (const node of nodes) {
       if (!isFeature(node)) continue;
@@ -573,7 +745,8 @@ export function Map3DView({
           existing.element.style.display = markerVisible ? "" : "none";
         }
       }
-      const signature = geometrySignature(node, selected);
+      const markerSide = node.kind === "marker" ? labelPlan.get(node.id) ?? null : null;
+      const signature = geometrySignature(node, selected) + (node.kind === "marker" ? `|${markerSide}|${selected ? 1 : iconZoomFactor}` : "");
 
       if (existing && existing.kind === node.kind && existing.signature === signature) {
         continue;
@@ -688,7 +861,7 @@ export function Map3DView({
 
         // Destaque persistente: o ícone (SVG) é recriado com o estilo de seleção do 2D.
         element.sizePreserved = true;
-        applyMarkerContent(element, style, selected, node.name || "");
+        applyMarkerContent(element, style, selected, node.name || "", markerSide, iconZoomFactor);
         element.style.cursor = selected ? "grab" : "pointer";
         element.style.display = markerVisible ? "" : "none";
       } else if (node.kind === "polygon") {
@@ -720,7 +893,7 @@ export function Map3DView({
         overlaysRef.current.delete(id);
       }
     }
-  }, [nodes, filter, selectedId, cameraRange]);
+  }, [nodes, filter, selectedId, cameraRange, cameraTilt, cameraHeading]);
 
   useEffect(() => {
     if (moveId && (moveId !== selectedId || mode !== "none")) setMoveId(null);
@@ -749,8 +922,7 @@ export function Map3DView({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    const currentRange = Number(map.range);
-    if (Number.isFinite(currentRange) && currentRange > 0) setCameraRange(currentRange);
+    (map as any).__terraSyncRange?.();
   }, [status]);
 
   useEffect(() => {
@@ -810,6 +982,12 @@ export function Map3DView({
   return (
     <div className="absolute inset-0">
       <div ref={hostRef} className="absolute inset-0" />
+
+      <div
+        ref={altitudeRef}
+        className="pointer-events-none absolute bottom-12 right-3 z-10 rounded-md px-2 py-1 font-mono text-xs"
+        style={{ background: "var(--glass)" }}
+      />
 
       <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-border bg-card/90 p-1 shadow-lg backdrop-blur">
         <button className="earth-icon-btn" title="Alinhar câmera ao norte" aria-label="Alinhar câmera ao norte" onClick={resetNorth}>
