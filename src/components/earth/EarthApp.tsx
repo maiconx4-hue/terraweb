@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
+import { MousePointer2, MapPin, Pentagon, Route as RouteIcon, Ruler, MapPinned, Grip } from "lucide-react";
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { toast } from "sonner";
 import {
   defaultStyle, descendantIds, isFeature, isShown, uid,
@@ -11,6 +12,8 @@ import { Sidebar } from "./Sidebar";
 import { Properties } from "./Properties";
 import { FtthDialog } from "./FtthDialog";
 import { StreetViewMiniMap } from "./StreetViewMiniMap";
+import { Map3DView } from "./Map3DView";
+import { StreetView3DPanel } from "./StreetView3DPanel";
 import { showDraftVertices } from "./draftVertices";
 import {
   MARKER_DEFAULT_NAME, POLYGON_DEFAULT_DESCRIPTION, POLYGON_DEFAULT_NAME,
@@ -31,7 +34,8 @@ type Action =
   | { type: "add"; nodes: GeoNode[] }
   | { type: "update"; id: string; patch: Partial<GeoNode> }
   | { type: "remove"; id: string }
-  | { type: "move"; id: string; parentId: string | null };
+  | { type: "move"; id: string; parentId: string | null }
+  | { type: "moveMany"; ids: string[]; parentId: string | null };
 
 function reducer(state: GeoNode[], a: Action): GeoNode[] {
   switch (a.type) {
@@ -45,6 +49,20 @@ function reducer(state: GeoNode[], a: Action): GeoNode[] {
     case "move": {
       if (a.parentId && descendantIds(state, a.id).has(a.parentId)) return state;
       return state.map((n) => (n.id === a.id ? { ...n, parentId: a.parentId } : n));
+    }
+    case "moveMany": {
+      const selected = new Set(a.ids);
+      const roots = a.ids.filter((id) => {
+        let current = state.find((n) => n.id === id);
+        while (current?.parentId) {
+          if (selected.has(current.parentId)) return false;
+          current = state.find((n) => n.id === current!.parentId);
+        }
+        return true;
+      });
+      if (a.parentId && roots.some((id) => descendantIds(state, id).has(a.parentId!))) return state;
+      const moving = new Set(roots);
+      return state.map((n) => moving.has(n.id) ? { ...n, parentId: a.parentId } : n);
     }
   }
 }
@@ -99,13 +117,66 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   const [zoom, setZoom] = useState(4);
   const [filter, setFilter] = useState<Filter>({ text: "", kinds: { marker: true, polygon: true, path: true } });
   const [mapType, setMapType] = useState("hybrid");
-  const [cursor, setCursor] = useState<LatLng | null>(null);
+  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  const [hasOpened3D, setHasOpened3D] = useState(false);
+  const [focus3D, setFocus3D] = useState<{ center: LatLng; nonce: number } | null>(null);
+  const [center3D, setCenter3D] = useState<LatLng>({ lat: -15.78, lng: -47.93 });
   const [sv, setSv] = useState<{ visible: boolean; pos: LatLng | null; heading: number }>({ visible: false, pos: null, heading: 0 });
+  const [sv3dOpen, setSv3dOpen] = useState(false);
+  const pendingSvRef = useRef<{ pos: LatLng; heading: number } | null>(null);
+  const [svLive, setSvLive] = useState<{ id: string; pos: LatLng } | null>(null);
+  const [sv3dPosition, setSv3dPosition] = useState<LatLng | null>(null);
+  const [sv3dHeading, setSv3dHeading] = useState(0);
   const [goto, setGoto] = useState("");
   const [ftthOpen, setFtthOpen] = useState(false);
   const [savedMeasure, setSavedMeasure] = useState<number | null>(null);
+  const [toolbarPosition, setToolbarPosition] = useState({ x: 12, y: 12 });
+  const toolbarDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const startToolbarDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    const toolbar = event.currentTarget.parentElement;
+    const bounds = toolbar?.parentElement?.getBoundingClientRect();
+    if (!toolbar || !bounds) return;
+    event.preventDefault();
+    event.stopPropagation();
+    toolbarDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: toolbarPosition.x,
+      originY: toolbarPosition.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveToolbarDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = toolbarDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const toolbar = event.currentTarget.parentElement;
+    const bounds = toolbar?.parentElement?.getBoundingClientRect();
+    if (!toolbar || !bounds) return;
+    const maxX = Math.max(0, bounds.width - toolbar.offsetWidth);
+    const maxY = Math.max(0, bounds.height - toolbar.offsetHeight);
+    setToolbarPosition({
+      x: Math.min(maxX, Math.max(0, drag.originX + event.clientX - drag.startX)),
+      y: Math.min(maxY, Math.max(0, drag.originY + event.clientY - drag.startY)),
+    });
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const stopToolbarDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (toolbarDragRef.current?.pointerId !== event.pointerId) return;
+    toolbarDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    event.stopPropagation();
+  };
 
   const mapDiv = useRef<HTMLDivElement>(null);
+  const cursorDisplayRef = useRef<HTMLDivElement>(null);
+  const cursorFrameRef = useRef<number | null>(null);
+  const pendingCursorRef = useRef<LatLng | null>(null);
   const mapRef = useRef<any>(null);
   const overlays = useRef(new Map<string, any>());
   const draftOverlay = useRef<any>(null);
@@ -182,23 +253,41 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
             return { center: { lat: -15.78, lng: -47.93 }, zoom: 4 };
           })(),
           mapTypeId: "hybrid",
-          tilt: 45,
+          // VECTOR habilita WebGL, zoom fracionário e interações modernas.
+          // O DEMO_MAP_ID é fallback de desenvolvimento; configure VITE_GOOGLE_MAP_ID
+          // com um Map ID próprio no Google Cloud para produção.
+          mapId: import.meta.env["VITE_GOOGLE_MAP_ID"] || g.maps.Map.DEMO_MAP_ID,
+          renderingType: g.maps.RenderingType?.VECTOR ?? "VECTOR",
+          isFractionalZoomEnabled: true,
+          tiltInteractionEnabled: true,
+          headingInteractionEnabled: true,
           clickableIcons: false,
           streetViewControl: true,
           fullscreenControl: false,
           mapTypeControl: false,
           rotateControl: true,
-          styles: [{ featureType: "poi", stylers: [{ visibility: "off" }] }],
         });
         mapRef.current = map;
         setZoom(map.getZoom?.() ?? 4);
-        map.addListener("zoom_changed", () => setZoom(map.getZoom() ?? 4));
         map.addListener("idle", () => {
+          const currentZoom = map.getZoom() ?? 4;
+          setZoom((previous) => previous === currentZoom ? previous : currentZoom);
           const c = map.getCenter();
-          if (c) localStorage.setItem(VIEW_KEY, JSON.stringify({ center: { lat: c.lat(), lng: c.lng() }, zoom: map.getZoom(), mapTypeId: map.getMapTypeId() }));
+          if (c) localStorage.setItem(VIEW_KEY, JSON.stringify({ center: { lat: c.lat(), lng: c.lng() }, zoom: currentZoom, mapTypeId: map.getMapTypeId() }));
         });
         info.current = new g.maps.InfoWindow();
-        map.addListener("mousemove", (e: any) => setCursor({ lat: e.latLng.lat(), lng: e.latLng.lng() }));
+        map.addListener("mousemove", (e: any) => {
+          if (!e.latLng) return;
+          pendingCursorRef.current = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+          if (cursorFrameRef.current !== null) return;
+          cursorFrameRef.current = window.requestAnimationFrame(() => {
+            cursorFrameRef.current = null;
+            const point = pendingCursorRef.current;
+            if (point && cursorDisplayRef.current) {
+              cursorDisplayRef.current.textContent = `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`;
+            }
+          });
+        });
         map.addListener("click", (e: any) => {
           const m = modeRef.current;
           const p = { lat: e.latLng.lat(), lng: e.latLng.lng() };
@@ -220,10 +309,43 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         setReady(true);
       })
       .catch((e) => toast.error(e.message));
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (cursorFrameRef.current !== null) {
+        window.cancelAnimationFrame(cursorFrameRef.current);
+        cursorFrameRef.current = null;
+      }
+    };
   }, [createFeature, updateDraft]);
 
   useEffect(() => { mapRef.current?.setMapTypeId(mapType); }, [mapType, ready]);
+
+  useEffect(() => {
+    if (viewMode === "2d" && ready && mapRef.current) {
+      // O mapa 2D permanece montado durante a exploração 3D.
+      const g = window.google;
+      const timers: number[] = [];
+      timers.push(window.setTimeout(() => {
+        const map = mapRef.current;
+        if (!map) return;
+        g?.maps?.event?.trigger(map, "resize");
+        const pano = map.getStreetView();
+        const pending = pendingSvRef.current;
+        if (pending) {
+          pendingSvRef.current = null;
+          pano.setPosition(pending.pos);
+          pano.setPov({ heading: pending.heading, pitch: 0 });
+          pano.setVisible(true);
+        }
+        // Panorama aberto com o contêiner oculto fica sem tamanho: força o recálculo.
+        if (pano.getVisible()) {
+          g?.maps?.event?.trigger(pano, "resize");
+          timers.push(window.setTimeout(() => g?.maps?.event?.trigger(pano, "resize"), 250));
+        }
+      }, 50));
+      return () => timers.forEach((id) => window.clearTimeout(id));
+    }
+  }, [viewMode, ready]);
   useEffect(() => {
     mapRef.current?.setOptions({ disableDoubleClickZoom: mode === "polygon" || mode === "path" || mode === "ruler", draggableCursor: mode === "none" ? null : "crosshair" });
   }, [mode, ready]);
@@ -315,6 +437,9 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         ov.__kind = n.kind;
         ov.addListener("click", (e: any) => {
           setSelectedId(n.id);
+          // Em modo Marcador, clicar numa CTO existente a seleciona (e volta a Navegar)
+          // em vez de criar outra por cima.
+          if (n.kind === "marker" && modeRef.current === "marker") { modeRef.current = "none"; setMode("none"); }
           const cur = nodesRef.current.find((x) => x.id === n.id);
           if (!cur) return;
           const box = document.createElement("div");
@@ -362,7 +487,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         ov.setOptions({
           title: n.name,
           draggable: sel && interactive,
-          clickable: interactive,
+          clickable: interactive || mode === "marker",
           zIndex: sel ? 1000 : 1,
           icon: iconOpt,
           label: n.name && showLabel ? { text: n.name, color: "#ffffff", fontSize: `${Math.max(9, Math.round(13 * s.scale))}px`, fontWeight: "500", className: "earth-marker-label" } : null,
@@ -400,12 +525,17 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
     const ids = descendantIds(nodesRef.current, id);
     const pts = nodesRef.current.filter((n) => ids.has(n.id) && isFeature(n)).flatMap((n) => (n as FeatureNode).coords);
     if (!pts.length) return;
+    if (viewMode === "3d") {
+      const center = pts.reduce((acc, point) => ({ lat: acc.lat + point.lat / pts.length, lng: acc.lng + point.lng / pts.length }), { lat: 0, lng: 0 });
+      setFocus3D({ center, nonce: Date.now() });
+      return;
+    }
     if (map.getStreetView().getVisible()) map.getStreetView().setVisible(false);
     if (pts.length === 1) { map.setCenter(pts[0]!); map.setZoom(18); return; }
     const b = new g.maps.LatLngBounds();
     pts.forEach((p) => b.extend(p));
     map.fitBounds(b, 60);
-  }, []);
+  }, [viewMode]);
 
   const addFolder = () => {
     const f: GeoNode = { id: uid(), kind: "folder", name: "Nova pasta", description: "", parentId: targetFolder(), visible: true, open: true };
@@ -454,15 +584,16 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
     mapRef.current?.getStreetView().setVisible(false);
     mapRef.current?.setCenter(p);
     mapRef.current?.setZoom(17);
+    if (viewMode === "3d") setFocus3D({ center: p, nonce: Date.now() });
   };
 
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
   const tools: { id: Mode; label: string; hint: string }[] = [
-    { id: "none", label: "Navegar", hint: "Mover o mapa" },
-    { id: "marker", label: "Marcador", hint: "Clique no mapa" },
-    { id: "polygon", label: "Polígono", hint: "Clique os vértices, duplo clique conclui" },
-    { id: "path", label: "Caminho", hint: "Clique os pontos, duplo clique conclui" },
-    { id: "ruler", label: "Régua", hint: "Clique os pontos para medir" },
+    { id: "none", label: "Navegar", hint: "Mover o mapa", Icon: MousePointer2 },
+    { id: "marker", label: "Marcador", hint: "Clique no mapa", Icon: MapPin },
+    { id: "polygon", label: "Polígono", hint: "Clique os vértices, duplo clique conclui", Icon: Pentagon },
+    { id: "path", label: "Caminho", hint: "Clique os pontos, duplo clique conclui", Icon: RouteIcon },
+    { id: "ruler", label: "Régua", hint: "Clique os pontos para medir", Icon: Ruler },
   ];
 
   return (
@@ -476,39 +607,129 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
         onZoom={zoomTo}
         onToggle={(id, patch) => dispatch({ type: "update", id, patch })}
         onMove={(id, parentId) => dispatch({ type: "move", id, parentId })}
+        onMoveMany={(ids, parentId) => dispatch({ type: "moveMany", ids, parentId })}
         onAddFolder={addFolder}
         onImport={onImport}
         onExport={(f) => onExport(f)}
+        userId={userId}
+        userEmail={userEmail}
       />
 
       <main className="earth-main">
-        <div ref={mapDiv} className="earth-map" />
-        {userId && (
-          <a href="/conta" target="_blank" rel="noopener" title={`${userEmail ?? ""} — abrir conta em nova aba`} aria-label="Minha conta"
-            className="absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-foreground shadow-md hover:bg-muted">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></svg>
-          </a>
+        <div ref={mapDiv} className="earth-map" style={{ display: viewMode === "2d" ? "block" : "none" }} />
+        {hasOpened3D && (
+          <div className="absolute inset-0" style={{ display: viewMode === "3d" ? "block" : "none" }}>
+            <Map3DView
+              nodes={nodes}
+              filter={filter}
+              selectedId={selectedId}
+              initialCenter={mapRef.current?.getCenter?.() ? { lat: mapRef.current.getCenter().lat(), lng: mapRef.current.getCenter().lng() } : { lat: -15.78, lng: -47.93 }}
+              initialZoom={mapRef.current?.getZoom?.() ?? zoom}
+              focusRequest={focus3D}
+              onSelect={setSelectedId}
+              onUpdate={(id, patch) => dispatch({ type: "update", id, patch })}
+              onCenterChange={setCenter3D}
+              mode={mode}
+              draft={draft}
+              mapType={mapType}
+              liveMarker={svLive}
+              onCreateMarker={(point) => createFeature("marker", [point])}
+              onExitMarkerMode={() => { modeRef.current = "none"; setMode("none"); }}
+              onDraftPoint={(point) => updateDraft((d) => {
+                const last = d.at(-1);
+                return last && last.lat === point.lat && last.lng === point.lng ? d : [...d, point];
+              })}
+            />
+          </div>
         )}
 
-        <div className="earth-toolbar">
+        <div className="earth-toolbar" style={{ left: toolbarPosition.x, top: toolbarPosition.y }}>
+          <button
+            type="button"
+            className="earth-toolbar-drag"
+            title="Arrastar barra de ferramentas"
+            aria-label="Arrastar barra de ferramentas"
+            onPointerDown={startToolbarDrag}
+            onPointerMove={moveToolbarDrag}
+            onPointerUp={stopToolbarDrag}
+            onPointerCancel={stopToolbarDrag}
+          >
+            <Grip className="size-4" aria-hidden="true" />
+          </button>
+          <div className="earth-seg mr-1">
+            <button className="earth-seg-btn" data-active={viewMode === "2d"} onClick={() => {
+              if (viewMode === "3d" && sv3dOpen && sv3dPosition) {
+                // O contêiner 2D ainda está oculto neste momento; abrir o panorama agora o
+                // deixaria com tamanho zero. A abertura é feita no efeito abaixo, já visível.
+                pendingSvRef.current = { pos: sv3dPosition, heading: sv3dHeading };
+                setSv3dOpen(false);
+              }
+              setViewMode("2d");
+            }} title="Mapa vetorial 2D">2D</button>
+            <button className="earth-seg-btn" data-active={viewMode === "3d"} onClick={() => {
+              updateDraft([]); modeRef.current = "none"; setMode("none"); setHasOpened3D(true);
+              const pano = mapRef.current?.getStreetView();
+              if (pano?.getVisible()) {
+                const pos = pano.getPosition();
+                if (pos) setSv3dPosition({ lat: pos.lat(), lng: pos.lng() });
+                setSv3dHeading(pano.getPov()?.heading ?? 0);
+                pano.setVisible(false);
+                setSv3dOpen(true);
+              }
+              setViewMode("3d");
+            }} title="Exploração orbital 3D" disabled={!ready}>3D Orbital</button>
+          </div>
+          <button
+            type="button"
+            className="earth-seg-btn earth-tool-icon"
+            title={viewMode === "2d" ? (sv.visible ? "Fechar Street View" : "Abrir Street View no modo 2D") : (sv3dOpen ? "Fechar Street View" : "Abrir Street View no modo 3D")}
+            aria-label="Street View"
+            data-active={viewMode === "2d" ? sv.visible : sv3dOpen}
+            onClick={() => {
+              if (viewMode === "2d") {
+                const pano = mapRef.current?.getStreetView();
+                if (pano?.getVisible()) { pano.setVisible(false); return; }
+                const center = mapRef.current?.getCenter?.();
+                const start = sv3dPosition ?? (center ? { lat: center.lat(), lng: center.lng() } : { lat: -15.78, lng: -47.93 });
+                pano?.setPosition(sv.pos ?? start);
+                pano?.setPov({ heading: sv.heading ?? sv3dHeading, pitch: 0 });
+                pano?.setVisible(true);
+                return;
+              }
+              if (sv3dOpen) { setSv3dOpen(false); return; }
+              const center = mapRef.current?.getCenter?.();
+              const start = sv.visible && sv.pos ? sv.pos : sv3dPosition ?? center3D ?? (center ? { lat: center.lat(), lng: center.lng() } : { lat: -15.78, lng: -47.93 });
+              setSv3dPosition(start);
+              setSv3dHeading(sv.visible ? sv.heading ?? 0 : sv3dHeading);
+              setSv3dOpen(true);
+            }}
+          >
+            <MapPinned className="size-4" aria-hidden="true" />
+          </button>
           <div className="earth-seg">
             {tools.map((t) => (
               <button
                 key={t.id}
-                title={t.hint}
+                type="button"
+                title={`${t.label} — ${t.hint}`}
+                aria-label={t.label}
                 data-active={mode === t.id}
                 onClick={() => { updateDraft([]); modeRef.current = t.id; setMode(t.id); }}
-                className="earth-seg-btn"
+                className="earth-seg-btn earth-tool-icon"
               >
-                {t.label}
+                <t.Icon className="size-4" aria-hidden="true" />
               </button>
             ))}
           </div>
-          <select value={mapType} onChange={(e) => setMapType(e.target.value)} className="earth-input w-36">
+          <select
+            value={viewMode === "3d" && mapType !== "satellite" ? "hybrid" : mapType}
+            onChange={(e) => setMapType(e.target.value)}
+            className="earth-input w-36"
+          >
             <option value="hybrid">Satélite + rótulos</option>
             <option value="satellite">Satélite</option>
-            <option value="terrain">Relevo</option>
-            <option value="roadmap">Mapa</option>
+            {viewMode === "2d" && <option value="terrain">Relevo</option>}
+            {viewMode === "2d" && <option value="roadmap">Mapa</option>}
           </select>
           <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); onGoto(); }}>
             <input value={goto} onChange={(e) => setGoto(e.target.value)} placeholder="-23.5505, -46.6333" className="earth-input w-48 font-mono" />
@@ -533,13 +754,13 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
 
         {(mode === "polygon" || mode === "path") && (
           <div className="earth-float bottom-14 left-1/2 -translate-x-1/2">
-            <span className="text-sm">{draft.length} pontos · duplo clique ou Enter conclui · Esc cancela</span>
+            <span className="text-sm">{draft.length} pontos · clique nos pontos e conclua · Esc cancela</span>
             <button className="earth-btn" onClick={() => updateDraft((d) => d.slice(0, -1))} disabled={!draft.length}>Desfazer</button>
             <button className="earth-btn-primary" onClick={finishDraft}>Concluir</button>
           </div>
         )}
 
-        {sv.visible && sv.pos && (
+        {viewMode === "2d" && sv.visible && sv.pos && (
           <div className="earth-float top-16 left-1/2 -translate-x-1/2">
             <span className="font-mono text-xs">
               {sv.pos.lat.toFixed(6)}, {sv.pos.lng.toFixed(6)} · {Math.round(((sv.heading % 360) + 360) % 360)}°
@@ -549,16 +770,30 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           </div>
         )}
 
-        {sv.visible && sv.pos && (
+        {viewMode === "2d" && sv.visible && sv.pos && (
           <StreetViewMiniMap
             pos={sv.pos} heading={sv.heading} nodes={nodes} filter={filter}
             onMove={(p) => mapRef.current?.getStreetView().setPosition(p)}
           />
         )}
 
-        <div className="earth-status">
-          {cursor ? `${cursor.lat.toFixed(6)}, ${cursor.lng.toFixed(6)}` : "—"}
-        </div>
+        {viewMode === "3d" && sv3dOpen && sv3dPosition && (
+          <StreetView3DPanel
+            initialPosition={sv3dPosition}
+            initialHeading={sv3dHeading}
+            nodes={nodes}
+            filter={filter}
+            onClose={() => setSv3dOpen(false)}
+            onChange={({ pos, heading }) => { setSv3dPosition(pos); setSv3dHeading(heading); }}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onMoveNode={(id, pos) => dispatch({ type: "update", id, patch: { coords: [pos] } })}
+            onLiveMove={setSvLive}
+            onAddMarker={(point) => { createFeature("marker", [point]); toast.success("Marcador adicionado no Street View"); }}
+          />
+        )}
+
+        <div ref={cursorDisplayRef} className="earth-status">—</div>
 
         {selected && (
           <Properties

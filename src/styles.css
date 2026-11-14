@@ -235,3 +235,43 @@ body { font-family: var(--font-sans); }
 @media (prefers-reduced-motion: reduce) {
   .earth-draft-vertex-new::after { animation: none; opacity: 0; }
 }
+
+
+/* Ferramentas compactas: ícones com alvo acessível e tooltip nativo. */
+.earth-toolbar .earth-tool-icon {
+  @apply inline-flex size-8 items-center justify-center rounded-md px-0 py-0;
+}
+.earth-toolbar .earth-tool-icon[data-active="true"] {
+  @apply bg-primary text-primary-foreground;
+}
+
+
+/* Alça exclusiva para reposicionar a barra sem interferir nos botões ou no mapa. */
+.earth-toolbar-drag {
+  @apply inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing;
+  touch-action: none;
+  user-select: none;
+}
+
+
+/* Feedback consistente de seleção e ferramentas no mapa 2D/3D. */
+.earth-row[data-selected="true"] {
+  background: color-mix(in srgb, #facc15 18%, var(--secondary));
+  color: #facc15;
+  outline: 1px solid color-mix(in srgb, #facc15 65%, transparent);
+  box-shadow: inset 3px 0 0 #facc15;
+}
+.earth-row[data-selected="true"] > svg {
+  color: #facc15 !important;
+  filter: drop-shadow(0 0 4px rgb(250 204 21 / 65%));
+}
+.earth-toolbar .earth-tool-icon[data-active="true"] {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 2px rgb(250 204 21 / 28%), 0 0 12px rgb(250 204 21 / 30%);
+  animation: earth-tool-feedback 420ms ease-out;
+}
+@keyframes earth-tool-feedback {
+  0% { transform: scale(.88); filter: brightness(1.5); }
+  55% { transform: scale(1.16); }
+  100% { transform: scale(1.08); filter: brightness(1); }
+}
