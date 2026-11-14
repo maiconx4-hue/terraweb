@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 import { Compass, LocateFixed, LoaderCircle } from "lucide-react";
-import { isFeature, passesFilter, type Filter, type FeatureStyle, type GeoNode, type LatLng } from "@/lib/geo/types";
+import { isFeature, passesFilter, type Filter, type FeatureNode, type FeatureStyle, type GeoNode, type LatLng } from "@/lib/geo/types";
 
 type Props = {
   nodes: GeoNode[];
@@ -118,6 +118,33 @@ const draftVertexSvg = (isNew: boolean) => {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" fill="#ffffff" stroke="${isNew ? "#f97316" : "#f59e0b"}" stroke-width="2.5"/></svg>`;
 };
 
+/** Índice onde inserir um novo ponto: após o vértice da aresta mais próxima do clique. */
+const nearestEdgeInsertIndex = (coords: LatLng[], point: LatLng, closed: boolean) => {
+  const k = Math.cos((point.lat * Math.PI) / 180);
+  const toXY = (p: LatLng) => ({ x: p.lng * k, y: p.lat });
+  const target = toXY(point);
+  let best = coords.length;
+  let bestDistance = Infinity;
+  const edges = closed ? coords.length : coords.length - 1;
+  for (let i = 0; i < edges; i++) {
+    const a = toXY(coords[i]!);
+    const b = toXY(coords[(i + 1) % coords.length]!);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = dx * dx + dy * dy;
+    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((target.x - a.x) * dx + (target.y - a.y) * dy) / len));
+    const distance = Math.hypot(target.x - (a.x + t * dx), target.y - (a.y + t * dy));
+    if (distance < bestDistance) { bestDistance = distance; best = i + 1; }
+  }
+  return best;
+};
+
+/** Vértice editável: círculo branco; o selecionado fica laranja e maior. */
+const editVertexSvg = (selected: boolean) => {
+  const px = selected ? 24 : 18;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="${selected ? "#f97316" : "#ffffff"}" stroke="${selected ? "#ffffff" : "#f59e0b"}" stroke-width="3"/></svg>`;
+};
+
 const geometrySignature = (node: Extract<GeoNode, { kind: "marker" | "polygon" | "path" }>, selected: boolean) =>
   JSON.stringify({
     kind: node.kind,
@@ -176,6 +203,21 @@ export function Map3DView({
   const [moveId, setMoveId] = useState<string | null>(null);
   const moveIdRef = useRef<string | null>(null);
   moveIdRef.current = moveId;
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editVertex, setEditVertex] = useState<number | null>(null);
+  const [insertArm, setInsertArm] = useState(false);
+  const editIdRef = useRef<string | null>(null);
+  const editVertexRef = useRef<number | null>(null);
+  const insertArmRef = useRef(false);
+  const vertexClickTsRef = useRef(0);
+  const nodesLiveRef = useRef(nodes);
+  editIdRef.current = editId;
+  editVertexRef.current = editVertex;
+  insertArmRef.current = insertArm;
+  nodesLiveRef.current = nodes;
+  const editNode = editId ? nodes.find((node) => node.id === editId) : null;
+  const editShape: FeatureNode | null =
+    editNode && isFeature(editNode) && (editNode.kind === "polygon" || editNode.kind === "path") ? editNode : null;
 
   onSelectRef.current = onSelect;
   onUpdateRef.current = onUpdate;
@@ -266,6 +308,29 @@ export function Map3DView({
             onUpdateRef.current(moving, { coords: [point] });
             return;
           }
+          if (editIdRef.current) {
+            // Edição de vértices: move o vértice selecionado ou insere um ponto na aresta mais próxima.
+            // O clique espera um instante para ignorar o clique que apenas selecionou um vértice.
+            const clickedAt = performance.now();
+            if (clickedAt - vertexClickTsRef.current < 300) return;
+            window.setTimeout(() => {
+              if (Math.abs(vertexClickTsRef.current - clickedAt) < 300) return;
+              const id = editIdRef.current;
+              const shape = nodesLiveRef.current.find((node) => node.id === id);
+              if (!id || !shape || (shape.kind !== "polygon" && shape.kind !== "path")) return;
+              const coords = shape.coords;
+              if (insertArmRef.current) {
+                const at = nearestEdgeInsertIndex(coords, point, shape.kind === "polygon");
+                onUpdateRef.current(id, { coords: [...coords.slice(0, at), point, ...coords.slice(at)] });
+                setInsertArm(false);
+                setEditVertex(at);
+              } else if (editVertexRef.current !== null) {
+                const index = editVertexRef.current;
+                onUpdateRef.current(id, { coords: coords.map((c, i) => (i === index ? point : c)) });
+              }
+            }, 100);
+            return;
+          }
           const active = modeRef.current;
           if (active === "marker") {
             // Se o clique também atingiu uma CTO existente, seleciona-a em vez de criar outra.
@@ -338,6 +403,38 @@ export function Map3DView({
     const record = overlaysRef.current.get(liveMarker.id);
     if (record?.kind === "marker") record.element.position = { lat: liveMarker.pos.lat, lng: liveMarker.pos.lng, altitude: 0 };
   }, [liveMarker]);
+
+  // Vértices editáveis do polígono/caminho selecionado (sem criar elementos duplicados no
+  // desenho final: são marcadores temporários removidos ao concluir).
+  const editCoordsKey = editShape ? JSON.stringify(editShape.coords) : "";
+  useEffect(() => {
+    const map = mapRef.current;
+    const lib = libraryRef.current;
+    if (!map || !lib || status !== "ready" || !editShape) return;
+    const PointClass = lib.Marker3DInteractiveElement || lib.Marker3DElement;
+    if (!PointClass) return;
+    const created: any[] = [];
+    editShape.coords.forEach((point, index) => {
+      const vertex = new PointClass();
+      vertex.position = { lat: point.lat, lng: point.lng, altitude: 0 };
+      vertex.sizePreserved = true;
+      vertex.drawsWhenOccluded = true;
+      vertex.collisionBehavior = "REQUIRED";
+      vertex.zIndex = index === editVertex ? 30001 : 30000;
+      const template = document.createElement("template");
+      template.innerHTML = editVertexSvg(index === editVertex);
+      vertex.append(template);
+      vertex.addEventListener?.("gmp-click", () => {
+        vertexClickTsRef.current = performance.now();
+        setInsertArm(false);
+        setEditVertex(index);
+      });
+      map.append(vertex);
+      created.push(vertex);
+    });
+    return () => created.forEach((element) => element.remove?.());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editCoordsKey, editVertex, status, editId]);
 
   // Rascunho durante a criação (polígono, caminho, régua): linha/área amarela e
   // vértices brancos, como no mapa 2D. Usa elementos não interativos para que os
@@ -593,6 +690,19 @@ export function Map3DView({
   }, [moveId, selectedId, mode]);
 
   useEffect(() => {
+    if (editId && (editId !== selectedId || mode !== "none")) { setEditId(null); setEditVertex(null); setInsertArm(false); }
+  }, [editId, selectedId, mode]);
+
+  useEffect(() => {
+    if (!editId) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setEditId(null); setEditVertex(null); setInsertArm(false); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editId]);
+
+  useEffect(() => {
     if (!moveId) return;
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setMoveId(null); };
     window.addEventListener("keydown", onKey);
@@ -657,6 +767,7 @@ export function Map3DView({
     });
   };
 
+  const selectedShape = nodes.find((node) => node.id === selectedId && (node.kind === "polygon" || node.kind === "path")) ?? null;
   const selectedMarker = nodes.find((node) => node.id === selectedId && node.kind === "marker") ?? null;
 
   return (
@@ -683,6 +794,39 @@ export function Map3DView({
               Mover CTO selecionada
             </button>
           )}
+        </div>
+      )}
+
+      {!editId && selectedShape && mode === "none" && (
+        <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
+          <button className="rounded-lg border border-border bg-card/90 px-3 py-2 text-sm shadow-lg backdrop-blur hover:border-yellow-400" onClick={() => { setMoveId(null); setEditId(selectedShape.id); setEditVertex(null); }}>
+            Editar vértices
+          </button>
+        </div>
+      )}
+
+      {editShape && mode === "none" && (
+        <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-lg border border-yellow-400 bg-card/95 px-3 py-2 text-sm shadow-lg backdrop-blur">
+          <span>
+            {insertArm ? "Clique no mapa para inserir o ponto" : editVertex === null ? "Clique em um vértice para selecioná-lo" : "Clique no mapa para mover o vértice"}
+          </span>
+          <button className={`rounded border px-2 py-1 ${insertArm ? "border-yellow-400 bg-yellow-400 text-black" : "border-border"}`} onClick={() => setInsertArm((v) => !v)}>
+            + Inserir ponto
+          </button>
+          <button
+            className="rounded border border-border px-2 py-1 disabled:opacity-40"
+            disabled={editVertex === null || editShape.coords.length <= (editShape.kind === "polygon" ? 3 : 2)}
+            onClick={() => {
+              if (editVertex === null) return;
+              onUpdate(editShape.id, { coords: editShape.coords.filter((_, i) => i !== editVertex) });
+              setEditVertex(null);
+            }}
+          >
+            Remover vértice
+          </button>
+          <button className="rounded border border-border px-2 py-1" onClick={() => { setEditId(null); setEditVertex(null); setInsertArm(false); }}>
+            Concluir (Esc)
+          </button>
         </div>
       )}
 
