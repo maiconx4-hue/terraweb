@@ -89,7 +89,7 @@ const MARKER_ICON_PATHS: Record<string, string> = {
  * Replica o ícone do mapa 2D: selecionado = contorno ciano (ou moldura amarela
  * no triângulo) e tamanho maior (2D usa 1.6x).
  */
-const buildMarkerSvg = (style: FeatureStyle, selected: boolean) => {
+const buildIconSvg = (style: FeatureStyle, selected: boolean) => {
   const px = Math.max(16, Math.round(26 * style.scale * (selected ? 1.6 : 1)));
   const color = style.color || "#c60000";
   if (style.icon === "triangle") {
@@ -106,11 +106,38 @@ const buildMarkerSvg = (style: FeatureStyle, selected: boolean) => {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24">${halo}<path fill="${color}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" d="${path}"/></svg>`;
 };
 
+let labelCanvas: CanvasRenderingContext2D | null = null;
+const measureLabel = (text: string, bold: boolean) => {
+  labelCanvas ??= document.createElement("canvas").getContext("2d");
+  if (!labelCanvas) return text.length * 6.5;
+  labelCanvas.font = `${bold ? "600 " : ""}12px Arial, Helvetica, sans-serif`;
+  return labelCanvas.measureText(text).width;
+};
+const escapeXml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * Ícone + título no mesmo SVG, para controlar o tamanho do texto (o rótulo nativo do
+ * Maps 3D é grande demais). Título pequeno à direita do ícone, como no Google Earth Pro;
+ * o ícone fica centralizado no SVG para que continue exatamente sobre a coordenada.
+ */
+const buildMarkerSvg = (style: FeatureStyle, selected: boolean, name: string) => {
+  const px = Math.max(16, Math.round(26 * style.scale * (selected ? 1.6 : 1)));
+  const icon = buildIconSvg(style, selected);
+  const text = name.trim();
+  if (!text) return icon;
+  const textWidth = Math.ceil(measureLabel(text, selected));
+  const half = Math.ceil(px / 2 + 5 + textWidth + 3);
+  const width = half * 2;
+  const nested = icon.replace('<svg xmlns="http://www.w3.org/2000/svg"', `<svg x="${half - px / 2}" y="0"`);
+  const label = `<text x="${half + px / 2 + 5}" y="${px / 2}" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="${selected ? 600 : 400}" fill="#ffffff" stroke="#000000" stroke-opacity="0.85" stroke-width="3" stroke-linejoin="round" paint-order="stroke">${escapeXml(text)}</text>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${px}" viewBox="0 0 ${width} ${px}">${nested}${label}</svg>`;
+};
+
 /** Substitui o conteúdo visual do marcador 3D (sem criar elementos duplicados). */
-const applyMarkerContent = (element: any, style: FeatureStyle, selected: boolean) => {
+const applyMarkerContent = (element: any, style: FeatureStyle, selected: boolean, name: string) => {
   element.querySelectorAll?.("template").forEach((t: Element) => t.remove());
   const template = document.createElement("template");
-  template.innerHTML = buildMarkerSvg(style, selected);
+  template.innerHTML = buildMarkerSvg(style, selected, name);
   element.append(template);
 };
 
@@ -652,7 +679,6 @@ export function Map3DView({
 
       if (node.kind === "marker") {
         element.position = coords[0];
-        element.label = node.name || "Marcador";
         element.title = node.name || "Marcador";
         element.drawsWhenOccluded = true;
         element.collisionBehavior = "OPTIONAL_AND_HIDES_LOWER_PRIORITY";
@@ -660,7 +686,7 @@ export function Map3DView({
 
         // Destaque persistente: o ícone (SVG) é recriado com o estilo de seleção do 2D.
         element.sizePreserved = true;
-        applyMarkerContent(element, style, selected);
+        applyMarkerContent(element, style, selected, node.name || "");
         element.style.cursor = selected ? "grab" : "pointer";
         element.style.display = markerVisible ? "" : "none";
       } else if (node.kind === "polygon") {
