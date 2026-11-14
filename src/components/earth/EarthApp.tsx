@@ -123,6 +123,7 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   const [center3D, setCenter3D] = useState<LatLng>({ lat: -15.78, lng: -47.93 });
   const [sv, setSv] = useState<{ visible: boolean; pos: LatLng | null; heading: number }>({ visible: false, pos: null, heading: 0 });
   const [sv3dOpen, setSv3dOpen] = useState(false);
+  const pendingSvRef = useRef<{ pos: LatLng; heading: number } | null>(null);
   const [svLive, setSvLive] = useState<{ id: string; pos: LatLng } | null>(null);
   const [sv3dPosition, setSv3dPosition] = useState<LatLng | null>(null);
   const [sv3dHeading, setSv3dHeading] = useState(0);
@@ -322,7 +323,27 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
   useEffect(() => {
     if (viewMode === "2d" && ready && mapRef.current) {
       // O mapa 2D permanece montado durante a exploração 3D.
-      window.setTimeout(() => window.google?.maps?.event?.trigger(mapRef.current, "resize"), 0);
+      const g = window.google;
+      const timers: number[] = [];
+      timers.push(window.setTimeout(() => {
+        const map = mapRef.current;
+        if (!map) return;
+        g?.maps?.event?.trigger(map, "resize");
+        const pano = map.getStreetView();
+        const pending = pendingSvRef.current;
+        if (pending) {
+          pendingSvRef.current = null;
+          pano.setPosition(pending.pos);
+          pano.setPov({ heading: pending.heading, pitch: 0 });
+          pano.setVisible(true);
+        }
+        // Panorama aberto com o contêiner oculto fica sem tamanho: força o recálculo.
+        if (pano.getVisible()) {
+          g?.maps?.event?.trigger(pano, "resize");
+          timers.push(window.setTimeout(() => g?.maps?.event?.trigger(pano, "resize"), 250));
+        }
+      }, 50));
+      return () => timers.forEach((id) => window.clearTimeout(id));
     }
   }, [viewMode, ready]);
   useEffect(() => {
@@ -638,10 +659,9 @@ export default function EarthApp({ userId, userEmail }: { userId?: string; userE
           <div className="earth-seg mr-1">
             <button className="earth-seg-btn" data-active={viewMode === "2d"} onClick={() => {
               if (viewMode === "3d" && sv3dOpen && sv3dPosition) {
-                const pano = mapRef.current?.getStreetView();
-                pano?.setPosition(sv3dPosition);
-                pano?.setPov({ heading: sv3dHeading, pitch: 0 });
-                pano?.setVisible(true);
+                // O contêiner 2D ainda está oculto neste momento; abrir o panorama agora o
+                // deixaria com tamanho zero. A abertura é feita no efeito abaixo, já visível.
+                pendingSvRef.current = { pos: sv3dPosition, heading: sv3dHeading };
                 setSv3dOpen(false);
               }
               setViewMode("2d");
