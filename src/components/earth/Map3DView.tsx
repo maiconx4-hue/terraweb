@@ -42,8 +42,24 @@ const LABEL_MAX_ALTITUDE = 40_000;       // acima disso nenhum título é mostra
 const LABEL_HEIGHT_PX = 14;
 const ALWAYS_LABELS_ALTITUDE = 500;      // abaixo disso os títulos nunca somem, nem em movimento
 const MOVING_SETTLE_MS = 250;            // tempo parado para os títulos reaparecerem
-const ALL_LABELS_ALTITUDE = 4_000;       // até aqui todos os títulos aparecem (como o Earth a ~3,3 km)
-const LABEL_OVERLAP_TOLERANCE = 0.6;     // como no Earth, títulos podem se tocar um pouco
+const ALL_LABELS_ALTITUDE = 500;         // até aqui todos os títulos aparecem
+
+/**
+ * Tolerância de sobreposição entre títulos (fração do tamanho usada na colisão):
+ * perto, os títulos podem se tocar bastante; ao se afastar, exige-se mais espaço, e por
+ * isso os títulos vão sumindo de forma progressiva.
+ */
+const labelOverlapTolerance = (altitude: number) => {
+  const t = Math.log(Math.max(altitude, ALL_LABELS_ALTITUDE) / ALL_LABELS_ALTITUDE) / Math.log(LABEL_MAX_ALTITUDE / ALL_LABELS_ALTITUDE);
+  return clamp(0.2 + 0.8 * t ** 1.5, 0.2, 1);
+};
+
+/** Hash estável: a mesma CTO mantém prioridade e lado ao mudar o zoom (sem "pular"). */
+const stableHash = (text: string) => {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+};
 
 /** Quantos ícones manter: todos até bem longe (o Earth só tira os títulos primeiro). */
 const markerStrideFromAltitude = (altitude: number) => {
@@ -182,7 +198,7 @@ type LabelItem = { id: string; lat: number; lng: number; name: string; selected:
  * da câmera (altura, inclinação, direção e campo de visão). Aproximação: melhor em visão
  * mais vertical, menos exata com muita inclinação.
  */
-const planLabels = (items: LabelItem[], view: { range: number; tilt: number; heading: number; height: number; showAll: boolean }) => {
+const planLabels = (items: LabelItem[], view: { range: number; tilt: number; heading: number; height: number; showAll: boolean; tolerance: number }) => {
   const plan = new Map<string, "l" | "r" | null>();
   if (items.length === 0 || view.height <= 0) return plan;
   const mpp = (2 * view.range * Math.tan((FOV_DEG / 2) * (Math.PI / 180))) / view.height;
@@ -234,8 +250,8 @@ const planLabels = (items: LabelItem[], view: { range: number; tilt: number; hea
     const edge = item.px / 2 + 3;
     const x0 = side === "r" ? x + edge : x - edge - width;
     // O retângulo de colisão é menor que o título: tolera sobreposição leve.
-    const w = width * LABEL_OVERLAP_TOLERANCE;
-    const h = LABEL_HEIGHT_PX * LABEL_OVERLAP_TOLERANCE;
+    const w = width * view.tolerance;
+    const h = LABEL_HEIGHT_PX * view.tolerance;
     const rect = side === "r"
       ? [x0, y - h / 2, x0 + w, y + h / 2]
       : [x0 + width - w, y - h / 2, x0 + width, y + h / 2];
@@ -244,17 +260,20 @@ const planLabels = (items: LabelItem[], view: { range: number; tilt: number; hea
     return true;
   };
 
-  // O selecionado sempre mostra o título; depois os demais, alternando o lado preferido.
+  // O selecionado sempre mostra o título. Os demais seguem uma ordem estável e espalhada
+  // (hash), de modo que, ao aproximar, os títulos surgem de forma gradual e uniforme, e o
+  // lado preferido (esquerda/direita) alterna e se mantém entre um zoom e outro.
   for (const item of items) if (item.selected) { tryPlace(item, "r", true); plan.set(item.id, "r"); }
-  let flip = false;
-  for (const item of items) {
-    if (item.selected) continue;
+  const others = items
+    .filter((item) => !item.selected)
+    .map((item) => ({ item, hash: stableHash(item.id) }))
+    .sort((a, b) => a.hash - b.hash);
+  for (const { item, hash } of others) {
     if (!item.name.trim()) { plan.set(item.id, null); continue; }
-    const order: Array<"l" | "r"> = flip ? ["l", "r"] : ["r", "l"];
-    // Perto: todos os títulos aparecem (lado alternado). Longe: some o que colidir.
-    const side = order.find((candidate) => tryPlace(item, candidate)) ?? (view.showAll ? (tryPlace(item, order[0]!, true), order[0]!) : null);
+    const order: Array<"l" | "r"> = hash & 1 ? ["l", "r"] : ["r", "l"];
+    const side = order.find((candidate) => tryPlace(item, candidate, view.showAll))
+      ?? null;
     plan.set(item.id, side);
-    if (side) flip = !flip;
   }
   return plan;
 };
@@ -743,6 +762,7 @@ export function Map3DView({
         heading: cameraHeading,
         height: hostRef.current?.clientHeight ?? 0,
         showAll: altitude <= ALL_LABELS_ALTITUDE,
+        tolerance: labelOverlapTolerance(altitude),
       });
     }
 
