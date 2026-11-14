@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: terra-web
+    runtime: node
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NITRO_PRESET
+        value: render-com
+      - key: HOST
+        value: 0.0.0.0
