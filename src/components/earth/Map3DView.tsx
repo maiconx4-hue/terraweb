@@ -682,7 +682,9 @@ export function Map3DView({
         element.title = node.name || "Marcador";
         element.drawsWhenOccluded = true;
         element.collisionBehavior = "OPTIONAL_AND_HIDES_LOWER_PRIORITY";
-        element.zIndex = selected ? 10000 : 1;
+        // Marcadores sempre acima de polígonos e caminhos (máx. 10000), inclusive do selecionado,
+        // para que o clique sobre a CTO não seja capturado pela área do polígono.
+        element.zIndex = selected ? 15000 : 12000;
 
         // Destaque persistente: o ícone (SVG) é recriado com o estilo de seleção do 2D.
         element.sizePreserved = true;
